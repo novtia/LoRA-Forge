@@ -157,22 +157,22 @@ body {
   justify-content: center;
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input) {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel) {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input)::-webkit-scrollbar {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar {
   width: var(--scrollbar-size);
   height: var(--scrollbar-size);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input)::-webkit-scrollbar-track {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-track {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.28));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input)::-webkit-scrollbar-thumb {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-thumb {
   min-height: 32px;
   border-radius: 999px;
   border: 2px solid var(--scrollbar-thumb-border);
@@ -181,12 +181,12 @@ body {
   box-shadow: 0 0 14px rgba(212, 255, 0, 0.12);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input)::-webkit-scrollbar-thumb:hover {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 85, 0, 0.82));
   box-shadow: 0 0 18px rgba(255, 85, 0, 0.2);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input)::-webkit-scrollbar-corner {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-corner {
   background: transparent;
 }
 

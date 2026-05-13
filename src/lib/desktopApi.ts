@@ -160,6 +160,14 @@ export function getSystemStats(): Promise<SystemStats> {
   return invoke("get_system_stats");
 }
 
+export function readTextFile(path: string): Promise<string> {
+  return invoke("read_text_file", { path });
+}
+
+export function writeTextFile(path: string, content: string): Promise<void> {
+  return invoke("write_text_file", { path, content });
+}
+
 export function getActiveJob(projectId?: string): Promise<ActiveJobSummary | null> {
   return invoke("get_active_job", { projectId });
 }

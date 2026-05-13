@@ -1,18 +1,30 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import {
   Box,
+  ChevronDown,
   Cpu,
+  Download,
   FolderOpen,
   Gauge,
   Image as ImageIcon,
   Network,
   Settings2,
   Sliders,
+  Upload,
   Wrench,
   Zap,
 } from "lucide-react";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { TrainingConfig } from "../../lib/types";
 import { useI18n } from "../../lib/i18n";
+import {
+  DEFAULT_PRESETS,
+  PRESET_GROUPS,
+  applyPreset,
+  type TrainingPreset,
+} from "../../lib/presets";
+import { readTextFile, writeTextFile } from "../../lib/desktopApi";
 
 interface ConfigEditorProps {
   config: TrainingConfig;
@@ -22,15 +34,58 @@ interface ConfigEditorProps {
 type TabKey = "basic" | "advanced" | "expert";
 
 export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
+  const [selectedPresetId, setSelectedPresetId] = useState<string>("");
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const isAnimaTraining = config.trainingScript === "anima_train_network.py";
 
   const updateConfig = <K extends keyof TrainingConfig>(key: K, value: TrainingConfig[K]) => {
-    onChange({
-      ...config,
-      [key]: value,
-    });
+    onChange({ ...config, [key]: value });
   };
+
+  const handleApplyPreset = () => {
+    if (!selectedPresetId) return;
+    const preset = DEFAULT_PRESETS.find((p) => p.id === selectedPresetId);
+    if (!preset) return;
+    onChange(applyPreset(config, preset));
+    setPresetError(null);
+  };
+
+  const handleExportPreset = async () => {
+    try {
+      const savePath = await saveDialog({
+        title: t("config.presetExport"),
+        defaultPath: t("config.presetExportFilename"),
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!savePath) return;
+      await writeTextFile(savePath as string, JSON.stringify(config, null, 2));
+    } catch {
+      // user cancelled or write failed — silent
+    }
+  };
+
+  const handleImportPreset = async () => {
+    try {
+      const filePath = await openDialog({
+        title: t("config.presetImport"),
+        multiple: false,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!filePath) return;
+      const text = await readTextFile(filePath as string);
+      const parsed = JSON.parse(text) as Partial<TrainingConfig>;
+      onChange({ ...config, ...parsed });
+      setPresetError(null);
+    } catch {
+      setPresetError(t("config.presetImportError"));
+    }
+  };
+
+  const selectedPreset: TrainingPreset | undefined = DEFAULT_PRESETS.find(
+    (p) => p.id === selectedPresetId,
+  );
 
   return (
     <div className="bento bento-detail view-config">
@@ -79,6 +134,102 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
                 : t("config.tabExpert")}
           </div>
         </div>
+        {/* ── Preset bar ─────────────────────────────────────────── */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.4rem",
+            marginBottom: "0.45rem",
+            padding: "0 0.1rem",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.62rem",
+              textTransform: "uppercase",
+              color: "var(--text-muted)",
+              letterSpacing: "0.06em",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {t("config.preset")}
+          </span>
+
+          {/* custom preset dropdown (native <select> can't be themed in WebView2) */}
+          <PresetDropdown
+            value={selectedPresetId}
+            onChange={(v) => { setSelectedPresetId(v); setPresetError(null); }}
+            placeholder={t("config.presetPlaceholder")}
+            language={language}
+          />
+
+          <button
+            type="button"
+            className="btn"
+            style={{ height: "1.85rem", padding: "0 0.75rem", fontSize: "0.78rem", whiteSpace: "nowrap" }}
+            disabled={!selectedPresetId}
+            onClick={handleApplyPreset}
+            title={
+              selectedPreset
+                ? (language === "zh-CN" ? selectedPreset.descriptionZh : selectedPreset.description)
+                : undefined
+            }
+          >
+            {t("config.presetApply")}
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{ height: "1.85rem", padding: "0 0.6rem", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
+            onClick={() => void handleImportPreset()}
+            title={t("config.presetImport")}
+          >
+            <Upload size={12} /> {t("config.presetImport")}
+          </button>
+
+          <button
+            type="button"
+            className="btn"
+            style={{ height: "1.85rem", padding: "0 0.6rem", fontSize: "0.78rem", display: "flex", alignItems: "center", gap: "0.3rem" }}
+            onClick={() => void handleExportPreset()}
+            title={t("config.presetExport")}
+          >
+            <Download size={12} /> {t("config.presetExport")}
+          </button>
+        </div>
+
+        {/* preset description hint */}
+        {selectedPreset ? (
+          <div
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.62rem",
+              color: "var(--text-muted)",
+              marginBottom: "0.4rem",
+              padding: "0 0.1rem",
+              lineHeight: 1.4,
+            }}
+          >
+            {language === "zh-CN" ? selectedPreset.descriptionZh : selectedPreset.description}
+          </div>
+        ) : null}
+        {presetError ? (
+          <div
+            style={{
+              fontSize: "0.62rem",
+              color: "var(--accent-danger, #f55)",
+              marginBottom: "0.4rem",
+              padding: "0 0.1rem",
+            }}
+          >
+            {presetError}
+          </div>
+        ) : null}
+
+        {/* ── Tab buttons ─────────────────────────────────────────── */}
         <div className="design-segment-row" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
           <button
             type="button"
@@ -116,14 +267,17 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
                 value={config.trainingScript}
                 onChange={(value) => updateConfig("trainingScript", value)}
                 options={[
-                  { label: "SD 1.x / 2.x", value: "train_network.py" },
-                  { label: "SDXL", value: "sdxl_train_network.py" },
+                  { label: t("config.trainNetworkScript"), value: "train_network.py" },
+                  { label: t("config.sdxlTrainNetworkScript"), value: "sdxl_train_network.py" },
+                  { label: t("config.animaTrainNetworkScript"), value: "anima_train_network.py" },
                 ]}
               />
-              <TextField
+              <FilePickerField
                 label={t("config.pretrainedModel")}
                 value={config.pretrainedModel}
                 onChange={(value) => updateConfig("pretrainedModel", value)}
+                placeholder={isAnimaTraining ? t("config.animaPretrainedPlaceholder") : "runwayml/stable-diffusion-v1-5"}
+                filters={[{ name: "Model", extensions: ["safetensors", "ckpt", "pt"] }]}
               />
               <TextField
                 label={t("config.resolution")}
@@ -131,18 +285,40 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
                 onChange={(value) => updateConfig("resolution", value)}
                 placeholder="1024x1024"
               />
-              <TextField
+              <FilePickerField
                 label={t("config.vaeOptional")}
                 value={config.vae}
-                placeholder={t("config.vaePlaceholder")}
+                placeholder={isAnimaTraining ? t("config.animaVaePlaceholder") : t("config.vaePlaceholder")}
                 onChange={(value) => updateConfig("vae", value)}
+                filters={[{ name: "VAE", extensions: ["safetensors", "pt", "pth"] }]}
               />
-              <NumberField
-                label={t("config.clipSkip")}
-                value={config.clipSkip}
-                onChange={(value) => updateConfig("clipSkip", value)}
-              />
+              {!isAnimaTraining ? (
+                <NumberField
+                  label={t("config.clipSkip")}
+                  value={config.clipSkip}
+                  onChange={(value) => updateConfig("clipSkip", value)}
+                />
+              ) : (
+                <FilePickerField
+                  label={t("config.animaQwen3")}
+                  value={config.animaQwen3}
+                  placeholder={t("config.animaQwen3Placeholder")}
+                  onChange={(value) => updateConfig("animaQwen3", value)}
+                  filters={[{ name: "Qwen3", extensions: ["safetensors"] }]}
+                  allowDirectory
+                />
+              )}
             </div>
+            {isAnimaTraining ? (
+              <div className="config-grid" style={{ gridTemplateColumns: "repeat(5, 1fr)", marginTop: "0.5rem" }}>
+                <TextField
+                  label={t("config.animaLlmAdapterLr")}
+                  value={config.animaLlmAdapterLr}
+                  placeholder="0"
+                  onChange={(value) => updateConfig("animaLlmAdapterLr", value)}
+                />
+              </div>
+            ) : null}
           </SectionCard>
 
           <SectionCard title={t("config.coreTraining")} icon={<Zap size={18} />} animationDelay="0.04s">
@@ -542,15 +718,17 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
               />
             </div>
             <div className="config-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: "0.35rem" }}>
-              <TextField
+              <FilePickerField
                 label={t("config.networkWeights")}
                 value={config.networkWeights}
                 onChange={(value) => updateConfig("networkWeights", value)}
+                filters={[{ name: "LoRA weights", extensions: ["safetensors", "pt"] }]}
               />
-              <TextField
+              <FilePickerField
                 label={t("config.resume")}
                 value={config.resume}
                 onChange={(value) => updateConfig("resume", value)}
+                allowDirectory
               />
             </div>
           </SectionCard>
@@ -560,6 +738,186 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
     </div>
   );
 }
+
+// ─── PresetDropdown ─────────────────────────────────────────────────────────
+// Fully custom dropdown rendered via Portal to escape any ancestor overflow:hidden.
+
+const GROUP_LABEL_STYLE: React.CSSProperties = {
+  padding: "0.35rem 0.75rem 0.15rem",
+  fontSize: "0.62rem",
+  fontFamily: "var(--font-mono)",
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "var(--accent-acid, #d4ff00)",
+  userSelect: "none",
+  pointerEvents: "none",
+};
+
+function DropdownItem({
+  onClick,
+  active,
+  children,
+}: {
+  onClick: () => void;
+  active: boolean;
+  children: ReactNode;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const bg = active || hovered ? "rgba(255,255,255,0.07)" : "transparent";
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        padding: "0.38rem 0.75rem 0.38rem 1.25rem",
+        fontSize: "0.78rem",
+        color: active ? "var(--accent-acid, #d4ff00)" : "var(--text-primary, #e8e8e8)",
+        background: bg,
+        cursor: "pointer",
+        transition: "background 0.1s",
+        userSelect: "none",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function PresetDropdown({
+  value,
+  onChange,
+  placeholder,
+  language,
+}: {
+  value: string;
+  onChange: (id: string) => void;
+  placeholder: string;
+  language: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (
+        triggerRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const toggleOpen = () => {
+    if (!open && triggerRef.current) {
+      setRect(triggerRef.current.getBoundingClientRect());
+    }
+    setOpen((o) => !o);
+  };
+
+  const select = (id: string) => { onChange(id); setOpen(false); };
+
+  const selected = DEFAULT_PRESETS.find((p) => p.id === value);
+  const displayLabel = selected
+    ? (language === "zh-CN" ? selected.labelZh : selected.label)
+    : placeholder;
+
+  const panel = open && rect
+    ? createPortal(
+        <div
+          ref={panelRef}
+          className="preset-dropdown-panel"
+          style={{
+            position: "fixed",
+            top: rect.bottom + 3,
+            left: rect.left,
+            width: rect.width,
+            zIndex: 9999,
+            background: "var(--bg-card, #18181b)",
+            border: "1px solid var(--border-dim, #333)",
+            borderRadius: "5px",
+            boxShadow: "0 12px 32px rgba(0,0,0,0.75)",
+            maxHeight: "340px",
+            overflowY: "auto",
+            padding: "0.2rem 0",
+          }}
+        >
+          {/* placeholder / clear row */}
+          <DropdownItem active={!value} onClick={() => select("")}>
+            <span style={{ color: "var(--text-muted)" }}>{placeholder}</span>
+          </DropdownItem>
+
+          {PRESET_GROUPS.map((group) => {
+            const items = DEFAULT_PRESETS.filter((p) => p.script === group.scriptMatch);
+            return (
+              <div key={group.scriptMatch}>
+                <div style={GROUP_LABEL_STYLE}>
+                  {language === "zh-CN" ? group.labelZh : group.label}
+                </div>
+                {items.map((p) => (
+                  <DropdownItem key={p.id} active={p.id === value} onClick={() => select(p.id)}>
+                    {language === "zh-CN" ? p.labelZh : p.label}
+                  </DropdownItem>
+                ))}
+              </div>
+            );
+          })}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
+      <button
+        ref={triggerRef}
+        type="button"
+        onClick={toggleOpen}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.4rem",
+          height: "1.85rem",
+          padding: "0 0.6rem",
+          fontSize: "0.78rem",
+          background: "var(--bg-input, var(--bg-surface))",
+          border: "1px solid var(--border-dim)",
+          borderRadius: "var(--radius-sm, 4px)",
+          color: selected ? "var(--text-primary)" : "var(--text-muted)",
+          cursor: "pointer",
+          textAlign: "left",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+        }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
+          {displayLabel}
+        </span>
+        <ChevronDown
+          size={12}
+          style={{
+            flexShrink: 0,
+            opacity: 0.55,
+            transform: open ? "rotate(180deg)" : undefined,
+            transition: "transform 0.15s",
+          }}
+        />
+      </button>
+      {panel}
+    </div>
+  );
+}
+
+// ─── SectionCard ─────────────────────────────────────────────────────────────
 
 function SectionCard({
   title,
@@ -580,6 +938,75 @@ function SectionCard({
         </span>
       </div>
       {children}
+    </div>
+  );
+}
+
+function FilePickerField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  filters,
+  allowDirectory = false,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  filters?: Array<{ name: string; extensions: string[] }>;
+  allowDirectory?: boolean;
+}) {
+  const handleBrowse = async () => {
+    try {
+      const selected = await openDialog({
+        multiple: false,
+        directory: allowDirectory && !filters,
+        filters: filters,
+        title: label,
+      });
+      if (selected) {
+        onChange(selected as string);
+      }
+    } catch {
+      // user cancelled or dialog error — keep existing value
+    }
+  };
+
+  return (
+    <div className="form-group">
+      <label className="form-label">{label}</label>
+      <div style={{ display: "flex", gap: "0.35rem" }}>
+        <input
+          type="text"
+          className="form-input"
+          value={value}
+          placeholder={placeholder}
+          onChange={(event) => onChange(event.target.value)}
+          style={{ flex: 1, minWidth: 0 }}
+        />
+        <button
+          type="button"
+          onClick={() => void handleBrowse()}
+          title={label}
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "2rem",
+            height: "2rem",
+            border: "1px solid var(--border-dim)",
+            borderRadius: "var(--radius-sm, 4px)",
+            background: "var(--surface-raised, var(--bg-card))",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <FolderOpen size={14} />
+        </button>
+      </div>
     </div>
   );
 }

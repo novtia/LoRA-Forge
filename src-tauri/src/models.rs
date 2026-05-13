@@ -120,6 +120,10 @@ pub struct TrainingConfig {
     pub pretrained_model: String,
     pub resolution: String,
     pub vae: String,
+    /// Qwen3-0.6B path (directory or `.safetensors`). Required when training with `anima_train_network.py`.
+    pub anima_qwen3: String,
+    /// Learning rate for Anima LLM adapter. Use `0` to freeze (recommended). Empty omits the flag (sd-scripts default).
+    pub anima_llm_adapter_lr: String,
     pub clip_skip: u32,
     pub network_dim: u32,
     pub network_alpha: u32,
@@ -223,6 +227,8 @@ impl Default for TrainingConfig {
             pretrained_model: "runwayml/stable-diffusion-v1-5".to_string(),
             resolution: "1024x1024".to_string(),
             vae: String::new(),
+            anima_qwen3: String::new(),
+            anima_llm_adapter_lr: "0".to_string(),
             clip_skip: 0,
             network_dim: 128,
             network_alpha: 64,
@@ -304,11 +310,28 @@ impl Default for LlmSettings {
 impl TrainingConfig {
     pub fn validate(&self) -> Result<(), String> {
         let script = self.training_script.trim();
-        if !matches!(script, "train_network.py" | "sdxl_train_network.py") {
+        if !matches!(
+            script,
+            "train_network.py" | "sdxl_train_network.py" | "anima_train_network.py"
+        ) {
             return Err(format!("Unsupported training script: '{script}'"));
         }
         if self.pretrained_model.trim().is_empty() {
             return Err("Pretrained model is required".to_string());
+        }
+        if script == "anima_train_network.py" {
+            if self.anima_qwen3.trim().is_empty() {
+                return Err("Anima training requires the Qwen3 text encoder path (--qwen3)".to_string());
+            }
+            if self.vae.trim().is_empty() {
+                return Err("Anima training requires the Qwen-Image VAE path (--vae)".to_string());
+            }
+            let llm_lr = self.anima_llm_adapter_lr.trim();
+            if !llm_lr.is_empty() {
+                llm_lr.parse::<f64>().map_err(|_| {
+                    format!("LLM adapter LR must be a valid number, got '{llm_lr}'")
+                })?;
+            }
         }
         let (width, height) = parse_resolution_dimensions(&self.resolution)?;
         if self.batch_size == 0 {
@@ -338,7 +361,8 @@ impl TrainingConfig {
                     "Minimum bucket resolution cannot exceed maximum bucket resolution".to_string(),
                 );
             }
-            let min_bucket_step = if script == "sdxl_train_network.py" {
+            let min_bucket_step = if script == "sdxl_train_network.py" || script == "anima_train_network.py"
+            {
                 32
             } else {
                 64
@@ -418,16 +442,28 @@ impl TrainingConfig {
     }
 
     pub fn summary_tags(&self) -> Vec<String> {
-        vec![
-            self.pretrained_model
-                .split('/')
-                .next_back()
-                .unwrap_or("MODEL")
-                .replace('-', "_")
-                .to_uppercase(),
-            format!("DIM: {}", self.network_dim),
-            self.optimizer.to_uppercase(),
-        ]
+        let script = self.training_script.trim();
+        let model_tag = self
+            .pretrained_model
+            .split('/')
+            .next_back()
+            .unwrap_or("MODEL")
+            .replace('-', "_")
+            .to_uppercase();
+        if script == "anima_train_network.py" {
+            vec![
+                "ANIMA".to_string(),
+                model_tag,
+                format!("DIM: {}", self.network_dim),
+                self.optimizer.to_uppercase(),
+            ]
+        } else {
+            vec![
+                model_tag,
+                format!("DIM: {}", self.network_dim),
+                self.optimizer.to_uppercase(),
+            ]
+        }
     }
 }
 

@@ -1,3 +1,5 @@
+use std::fs;
+
 use serde::Deserialize;
 use tauri::State;
 
@@ -107,6 +109,19 @@ fn save_training_config_inner(
     })?;
 
     Ok(config)
+}
+
+/// Read the text contents of any file (used for preset JSON import).
+#[tauri::command]
+pub fn read_text_file(path: String) -> Result<String, String> {
+    fs::read_to_string(&path).map_err(|e| format!("Failed to read '{}': {}", path, e))
+}
+
+/// Write text to any file path (used for preset JSON export).
+#[tauri::command]
+pub fn write_text_file(path: String, content: String) -> Result<(), String> {
+    fs::write(&path, content.as_bytes())
+        .map_err(|e| format!("Failed to write '{}': {}", path, e))
 }
 
 fn load_llm_settings_inner(state: AppState) -> AppResult<LlmSettings> {

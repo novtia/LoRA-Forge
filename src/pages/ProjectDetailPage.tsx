@@ -82,9 +82,20 @@ function chartBarsFromHistory(history: ActiveJobSummary["history"]): number[] {
   return history.map((point) => Math.min(100, Math.max(5, (point.loss / 0.2) * 100)));
 }
 
+function trainingScriptSummaryLabel(script: string, t: TranslateFn): string {
+  switch (script.trim()) {
+    case "sdxl_train_network.py":
+      return "SDXL";
+    case "anima_train_network.py":
+      return t("config.animaTrainNetworkScript");
+    default:
+      return t("config.trainNetworkScript");
+  }
+}
+
 function configSummary(config: TrainingConfig, t: TranslateFn) {
   const summary = [
-    { key: t("config.trainingScript"), val: config.trainingScript === "sdxl_train_network.py" ? "SDXL" : "SD 1.x / 2.x" },
+    { key: t("config.trainingScript"), val: trainingScriptSummaryLabel(config.trainingScript, t) },
     { key: t("config.pretrainedModel"), val: config.pretrainedModel },
     { key: t("config.resolution"), val: config.resolution },
     { key: t("config.datasetRepeats"), val: String(config.datasetRepeats) },
@@ -107,6 +118,15 @@ function configSummary(config: TrainingConfig, t: TranslateFn) {
     },
     { key: t("config.seed"), val: String(config.seed) },
   ];
+
+  if (config.trainingScript.trim() === "anima_train_network.py") {
+    if (config.animaQwen3.trim()) {
+      summary.push({ key: t("config.animaQwen3"), val: config.animaQwen3 });
+    }
+    if (config.animaLlmAdapterLr.trim()) {
+      summary.push({ key: t("config.animaLlmAdapterLr"), val: config.animaLlmAdapterLr });
+    }
+  }
 
   if (config.enableBucket) {
     summary.push({

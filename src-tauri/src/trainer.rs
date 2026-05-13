@@ -336,6 +336,22 @@ fn build_training_command(
 
     let max_train_steps = config.epochs.saturating_mul(config.steps_per_epoch).max(1);
     let resolution = parse_resolution(&config.resolution)?;
+    let is_anima = config.training_script.trim() == "anima_train_network.py";
+    let network_module = if is_anima {
+        "networks.lora_anima"
+    } else {
+        "networks.lora"
+    };
+
+    if is_anima {
+        let qwen3 = config.anima_qwen3.trim();
+        if looks_like_path(qwen3) && !Path::new(qwen3).exists() {
+            return Err(AppError::Validation(format!(
+                "Qwen3 path was not found: '{qwen3}'"
+            )));
+        }
+    }
+
     let mut command = training_subprocess_command(&python_executable);
     command
         .arg("-u")
@@ -353,7 +369,7 @@ fn build_training_command(
         .arg("--save_model_as")
         .arg("safetensors")
         .arg("--network_module")
-        .arg("networks.lora")
+        .arg(network_module)
         .arg("--network_dim")
         .arg(config.network_dim.to_string())
         .arg("--network_alpha")
@@ -390,6 +406,18 @@ fn build_training_command(
     if !config.vae.trim().is_empty() {
         command.arg("--vae").arg(config.vae.trim());
     }
+    if is_anima {
+        command.arg("--qwen3").arg(config.anima_qwen3.trim());
+        let llm_lr = config.anima_llm_adapter_lr.trim();
+        if !llm_lr.is_empty() {
+            append_optional_numeric_arg(
+                &mut command,
+                "--llm_adapter_lr",
+                "LLM adapter LR",
+                llm_lr,
+            )?;
+        }
+    }
     if !config.unet_lr.trim().is_empty() {
         command
             .arg("--unet_lr")
@@ -401,7 +429,7 @@ fn build_training_command(
             &config.text_encoder_lr,
         )?);
     }
-    if config.clip_skip > 0 {
+    if !is_anima && config.clip_skip > 0 {
         command.arg("--clip_skip").arg(config.clip_skip.to_string());
     }
     if !config.optimizer_args.trim().is_empty() {
@@ -595,7 +623,9 @@ fn resolve_training_script_path(
 ) -> AppResult<PathBuf> {
     let script_name = match config.training_script.trim() {
         "" => "train_network.py",
-        "train_network.py" | "sdxl_train_network.py" => config.training_script.trim(),
+        "train_network.py" | "sdxl_train_network.py" | "anima_train_network.py" => {
+            config.training_script.trim()
+        }
         other => {
             return Err(AppError::Validation(format!(
                 "Unsupported training script: '{other}'"

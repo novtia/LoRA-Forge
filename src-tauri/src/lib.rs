@@ -47,7 +47,9 @@ pub fn run() {
             commands::training::abort_training,
             commands::training::export_checkpoint,
             commands::system::get_system_stats,
-            commands::system::get_active_job
+            commands::system::get_active_job,
+            commands::config::read_text_file,
+            commands::config::write_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

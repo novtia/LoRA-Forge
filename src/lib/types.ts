@@ -32,6 +32,10 @@ export interface TrainingConfig {
   pretrainedModel: string;
   resolution: string;
   vae: string;
+  /** Qwen3-0.6B path (HF dir or `.safetensors`). Required for `anima_train_network.py`. */
+  animaQwen3: string;
+  /** Maps to `--llm_adapter_lr`. Use `0` to freeze (recommended). Empty = omit (sd-scripts default). */
+  animaLlmAdapterLr: string;
   clipSkip: number;
   networkDim: number;
   networkAlpha: number;

@@ -4,7 +4,7 @@ use crate::{
     error::{AppError, AppResult},
     models::{
         ActiveJobSummary, JobStatus, LlmSettings, LossPoint, ProjectRecord, ProjectStatus,
-        TrainingConfig, TrainingLogLine, TrainingSnapshot,
+        TrainingConfig, TrainingEnvSettings, TrainingLogLine, TrainingSnapshot,
     },
     utils::{normalize_display_path_string, now_ts},
 };
@@ -27,6 +27,13 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
 
         CREATE TABLE IF NOT EXISTS training_configs (
             project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            config_json TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS training_env_settings (
+            id TEXT PRIMARY KEY,
             config_json TEXT NOT NULL,
             version INTEGER NOT NULL DEFAULT 1,
             updated_at INTEGER NOT NULL
@@ -256,6 +263,37 @@ pub fn load_training_config(
     }
 }
 
+pub fn save_training_env(connection: &Connection, settings: &TrainingEnvSettings) -> AppResult<()> {
+    let config_json = serde_json::to_string(settings)?;
+    connection.execute(
+        "
+        INSERT INTO training_env_settings (id, config_json, version, updated_at)
+        VALUES ('global', ?1, 1, ?2)
+        ON CONFLICT(id) DO UPDATE SET
+            config_json = excluded.config_json,
+            version = training_env_settings.version + 1,
+            updated_at = excluded.updated_at
+        ",
+        params![config_json, now_ts()],
+    )?;
+    Ok(())
+}
+
+pub fn load_training_env(connection: &Connection) -> AppResult<TrainingEnvSettings> {
+    let maybe_json = connection
+        .query_row(
+            "SELECT config_json FROM training_env_settings WHERE id = 'global'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    match maybe_json {
+        Some(config_json) => Ok(serde_json::from_str(&config_json)?),
+        None => Ok(TrainingEnvSettings::default()),
+    }
+}
+
 pub fn save_llm_settings(connection: &Connection, settings: &LlmSettings) -> AppResult<()> {
     let config_json = serde_json::to_string(settings)?;
     connection.execute(
@@ -450,17 +488,7 @@ pub fn get_active_job(
         FROM jobs
         INNER JOIN projects ON projects.id = jobs.project_id
         WHERE jobs.project_id = ?1
-        ORDER BY
-            CASE jobs.status
-                WHEN 'running' THEN 0
-                WHEN 'paused' THEN 1
-                WHEN 'interrupted' THEN 2
-                WHEN 'completed' THEN 3
-                WHEN 'failed' THEN 4
-                WHEN 'aborted' THEN 5
-                ELSE 9
-            END,
-            jobs.started_at DESC
+        ORDER BY jobs.started_at DESC
         LIMIT 1
         "
     } else {

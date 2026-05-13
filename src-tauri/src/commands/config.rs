@@ -5,7 +5,7 @@ use crate::{
     commands::respond,
     db,
     error::{AppError, AppResult},
-    models::{LlmSettings, TrainingConfig},
+    models::{LlmSettings, TrainingConfig, TrainingEnvSettings},
     state::AppState,
 };
 
@@ -14,6 +14,12 @@ use crate::{
 pub struct SaveTrainingConfigInput {
     pub project_id: String,
     pub config: TrainingConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveTrainingEnvInput {
+    pub settings: TrainingEnvSettings,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +49,24 @@ pub fn save_training_config(
         &input.project_id,
         input.config,
     ))
+}
+
+#[tauri::command]
+pub fn load_training_env(state: State<'_, AppState>) -> Result<TrainingEnvSettings, String> {
+    respond(state.with_db(db::load_training_env))
+}
+
+#[tauri::command]
+pub fn save_training_env(
+    input: SaveTrainingEnvInput,
+    state: State<'_, AppState>,
+) -> Result<TrainingEnvSettings, String> {
+    let settings = input.settings;
+    respond(
+        state
+            .with_db(|connection| db::save_training_env(connection, &settings))
+            .map(|()| settings),
+    )
 }
 
 #[tauri::command]

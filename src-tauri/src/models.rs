@@ -164,12 +164,28 @@ pub struct TrainingConfig {
     pub save_every_n_steps: u32,
     pub save_last_n_epochs: u32,
     pub save_last_n_steps: u32,
+    pub sample_every_n_steps: u32,
+    pub sample_at_first: bool,
+    pub sample_every_n_epochs: u32,
+    pub sample_prompts: String,
+    pub sample_negative_prompt: String,
+    pub sample_width: u32,
+    pub sample_height: u32,
+    pub sample_steps: u32,
+    pub sample_cfg_scale: String,
+    pub sample_seed: u32,
+    pub sample_sampler: String,
     pub network_weights: String,
     pub resume: String,
     pub initial_epoch: u32,
     pub initial_step: u32,
-    pub python_executable: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TrainingEnvSettings {
     pub sd_scripts_path: String,
+    pub python_executable: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,6 +205,15 @@ fn default_sd_scripts_path() -> String {
         .join("sd-scripts")
         .to_string_lossy()
         .to_string()
+}
+
+impl Default for TrainingEnvSettings {
+    fn default() -> Self {
+        Self {
+            sd_scripts_path: default_sd_scripts_path(),
+            python_executable: String::new(),
+        }
+    }
 }
 
 impl Default for TrainingConfig {
@@ -242,12 +267,21 @@ impl Default for TrainingConfig {
             save_every_n_steps: 0,
             save_last_n_epochs: 0,
             save_last_n_steps: 0,
+            sample_every_n_steps: 0,
+            sample_at_first: false,
+            sample_every_n_epochs: 0,
+            sample_prompts: String::new(),
+            sample_negative_prompt: String::new(),
+            sample_width: 1024,
+            sample_height: 1024,
+            sample_steps: 30,
+            sample_cfg_scale: "7.5".to_string(),
+            sample_seed: 0,
+            sample_sampler: "ddim".to_string(),
             network_weights: String::new(),
             resume: String::new(),
             initial_epoch: 0,
             initial_step: 0,
-            python_executable: String::new(),
-            sd_scripts_path: default_sd_scripts_path(),
         }
     }
 }
@@ -327,6 +361,58 @@ impl TrainingConfig {
         }
         if self.initial_epoch > self.epochs {
             return Err("Initial epoch cannot exceed the total epochs".to_string());
+        }
+        let sample_sampler = self.sample_sampler.trim();
+        if !sample_sampler.is_empty()
+            && !matches!(
+                sample_sampler,
+                "ddim"
+                    | "pndm"
+                    | "lms"
+                    | "euler"
+                    | "euler_a"
+                    | "heun"
+                    | "dpm_2"
+                    | "dpm_2_a"
+                    | "dpmsolver"
+                    | "dpmsolver++"
+                    | "dpmsingle"
+                    | "k_lms"
+                    | "k_euler"
+                    | "k_euler_a"
+                    | "k_dpm_2"
+                    | "k_dpm_2_a"
+            )
+        {
+            return Err(format!("Unsupported sample sampler: '{sample_sampler}'"));
+        }
+        let sample_enabled =
+            self.sample_at_first || self.sample_every_n_steps > 0 || self.sample_every_n_epochs > 0;
+        if sample_enabled
+            && !self
+                .sample_prompts
+                .lines()
+                .any(|line| !line.trim().is_empty())
+        {
+            return Err("Sample prompt text is required when sample image generation is enabled".to_string());
+        }
+        if sample_enabled && (self.sample_width == 0 || self.sample_height == 0) {
+            return Err("Sample image width and height must be greater than zero".to_string());
+        }
+        if sample_enabled && self.sample_steps == 0 {
+            return Err("Sample image steps must be greater than zero".to_string());
+        }
+        if sample_enabled {
+            let cfg_scale = self.sample_cfg_scale.trim();
+            if cfg_scale.is_empty() {
+                return Err("Sample CFG scale is required when sample image generation is enabled".to_string());
+            }
+            cfg_scale.parse::<f64>().map_err(|_| {
+                format!(
+                    "Sample CFG scale must be a valid number, got '{}'",
+                    self.sample_cfg_scale.trim()
+                )
+            })?;
         }
         Ok(())
     }
@@ -545,6 +631,16 @@ pub struct DatasetPreviewAsset {
     pub relative_path: String,
     pub name: String,
     pub file_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SampleImageEntry {
+    pub relative_path: String,
+    pub name: String,
+    pub file_path: String,
+    pub depth: u32,
+    pub modified_at: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

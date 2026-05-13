@@ -33,11 +33,7 @@ import {
   projectAccent,
 } from "../lib/formatters";
 import { useI18n } from "../lib/i18n";
-import {
-  appendTrainingLog,
-  normalizeActiveJobLogs,
-  selectPrimaryTrainingLogs,
-} from "../lib/trainingLogs";
+import { appendTrainingLog, normalizeActiveJobLogs } from "../lib/trainingLogs";
 import { TrainingConsoleLine } from "../components/project/TrainingConsolePanel";
 import type { ActiveJobSummary, ProjectRecord, SystemStats } from "../lib/types";
 
@@ -352,7 +348,7 @@ export default function DashboardPage() {
               </div>
 
               <div className="terminal-block">
-                {selectPrimaryTrainingLogs(activeJob.recentLogs, 4).map((log) => (
+                {activeJob.recentLogs.slice(-4).map((log) => (
                   <TrainingConsoleLine
                     key={`${log.seq}-${log.createdAt}`}
                     log={log}
@@ -542,7 +538,7 @@ export default function DashboardPage() {
                 disabled={creating || !projectName.trim() || !projectPath.trim()}
                 style={{
                   opacity: creating || !projectName.trim() || !projectPath.trim() ? 0.5 : 1,
-                  cursor: creating || !projectName.trim() || !projectPath.trim() ? "not-allowed" : "none",
+                  cursor: creating || !projectName.trim() || !projectPath.trim() ? "not-allowed" : "pointer",
                 }}
               >
                 {creating ? t("dashboard.creating") : t("dashboard.createForge")}

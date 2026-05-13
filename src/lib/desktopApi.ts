@@ -7,8 +7,10 @@ import type {
   DatasetEntry,
   LlmSettings,
   ProjectRecord,
+  SampleImageEntry,
   SystemStats,
   TrainingConfig,
+  TrainingEnvSettings,
   TrainingLogEvent,
   TrainingProgressEvent,
   TrainingStateChangedEvent,
@@ -47,6 +49,18 @@ export function saveTrainingConfig(
   });
 }
 
+export function loadTrainingEnv(): Promise<TrainingEnvSettings> {
+  return invoke("load_training_env");
+}
+
+export function saveTrainingEnv(settings: TrainingEnvSettings): Promise<TrainingEnvSettings> {
+  return invoke("save_training_env", {
+    input: {
+      settings,
+    },
+  });
+}
+
 export function loadLlmSettings(): Promise<LlmSettings> {
   return invoke("load_llm_settings");
 }
@@ -61,6 +75,10 @@ export function saveLlmSettings(settings: LlmSettings): Promise<LlmSettings> {
 
 export function listDatasetEntries(projectId: string): Promise<DatasetEntry[]> {
   return invoke("list_dataset_entries", { projectId });
+}
+
+export function listSampleImages(projectId: string): Promise<SampleImageEntry[]> {
+  return invoke("list_sample_images", { projectId });
 }
 
 export function getDatasetAsset(

@@ -76,12 +76,26 @@ export interface TrainingConfig {
   saveEveryNSteps: number;
   saveLastNEpochs: number;
   saveLastNSteps: number;
+  sampleEveryNSteps: number;
+  sampleAtFirst: boolean;
+  sampleEveryNEpochs: number;
+  samplePrompts: string;
+  sampleNegativePrompt: string;
+  sampleWidth: number;
+  sampleHeight: number;
+  sampleSteps: number;
+  sampleCfgScale: string;
+  sampleSeed: number;
+  sampleSampler: string;
   networkWeights: string;
   resume: string;
   initialEpoch: number;
   initialStep: number;
-  pythonExecutable: string;
+}
+
+export interface TrainingEnvSettings {
   sdScriptsPath: string;
+  pythonExecutable: string;
 }
 
 export interface LlmSettings {
@@ -176,6 +190,14 @@ export interface DatasetPreviewAsset {
   relativePath: string;
   name: string;
   filePath: string;
+}
+
+export interface SampleImageEntry {
+  relativePath: string;
+  name: string;
+  filePath: string;
+  depth: number;
+  modifiedAt: number;
 }
 
 export interface TrainingProgressEvent {

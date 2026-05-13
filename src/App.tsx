@@ -1,7 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { AmbientBackground } from "./components/AmbientBackground";
-import { CustomCursor } from "./components/CustomCursor";
-import { DesignSettingsProvider, useDesignSettings } from "./components/DesignSettingsProvider";
+import { DesignSettingsProvider } from "./components/DesignSettingsProvider";
 import { Titlebar } from "./components/Titlebar";
 import DashboardPage from "./pages/DashboardPage";
 import DesignSettingsPage from "./pages/DesignSettingsPage";
@@ -17,14 +16,11 @@ export default function App() {
 }
 
 function AppShell() {
-  const { settings } = useDesignSettings();
-
   return (
     <>
       <div className="scan-flash" id="scan-fx" />
       <Titlebar />
       <AmbientBackground />
-      {settings.cursorMode === "radar" ? <CustomCursor /> : null}
       <div className="app-content">
         <Routes>
           <Route path="/" element={<DashboardPage />} />

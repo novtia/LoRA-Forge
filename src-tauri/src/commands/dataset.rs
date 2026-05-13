@@ -5,6 +5,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     thread,
+    time::UNIX_EPOCH,
 };
 
 use tauri::State;
@@ -14,7 +15,7 @@ use crate::{
     db,
     error::{AppError, AppResult},
     llm,
-    models::{DatasetAsset, DatasetEntry, DatasetEntryKind, DatasetPreviewAsset},
+    models::{DatasetAsset, DatasetEntry, DatasetEntryKind, DatasetPreviewAsset, SampleImageEntry},
     state::AppState,
     utils::{ensure_within, normalize_display_path, normalize_relative_path},
 };
@@ -63,6 +64,17 @@ pub fn get_dataset_preview_assets(
         state.inner().clone(),
         &project_id,
         &relative_paths,
+    ))
+}
+
+#[tauri::command]
+pub fn list_sample_images(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<SampleImageEntry>, String> {
+    respond(list_sample_images_inner(
+        state.inner().clone(),
+        &project_id,
     ))
 }
 
@@ -135,6 +147,25 @@ fn list_dataset_entries_inner(state: AppState, project_id: &str) -> AppResult<Ve
     let mut entries = Vec::new();
     visit_dataset(&dataset_root, &dataset_root, 0, &mut entries)?;
     entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(entries)
+}
+
+fn list_sample_images_inner(state: AppState, project_id: &str) -> AppResult<Vec<SampleImageEntry>> {
+    let project = state.with_db(|connection| db::get_project(connection, project_id))?;
+    let sample_root = PathBuf::from(project.root_path).join("sample");
+    if !sample_root.exists() {
+        return Ok(Vec::new());
+    }
+
+    let canonical_sample_root = fs::canonicalize(&sample_root)?;
+    let mut entries = Vec::new();
+    visit_sample_images(&sample_root, &canonical_sample_root, 0, &mut entries)?;
+    entries.sort_by(|left, right| {
+        right
+            .modified_at
+            .cmp(&left.modified_at)
+            .then_with(|| left.relative_path.cmp(&right.relative_path))
+    });
     Ok(entries)
 }
 
@@ -349,6 +380,50 @@ fn build_dataset_preview_requests(
     }
 
     Ok(requests)
+}
+
+fn visit_sample_images(
+    current_path: &Path,
+    canonical_sample_root: &Path,
+    depth: u32,
+    entries: &mut Vec<SampleImageEntry>,
+) -> AppResult<()> {
+    for entry in fs::read_dir(current_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            visit_sample_images(&path, canonical_sample_root, depth + 1, entries)?;
+            continue;
+        }
+        if !file_type.is_file() || !is_image_file(&path) {
+            continue;
+        }
+
+        let metadata = entry.metadata()?;
+        let modified_at = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs())
+            .unwrap_or(0);
+
+        let normalized_path = ensure_within(canonical_sample_root, &path)?;
+        let relative_path =
+            normalize_relative_path(normalized_path.strip_prefix(canonical_sample_root)?);
+        entries.push(SampleImageEntry {
+            relative_path,
+            name: path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("sample")
+                .to_string(),
+            file_path: normalize_display_path(&path),
+            depth,
+            modified_at,
+        });
+    }
+    Ok(())
 }
 
 fn build_dataset_preview_asset(

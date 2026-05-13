@@ -36,6 +36,7 @@ pub enum RuntimeJobControlMode {
 pub struct RuntimeJob {
     pub job_id: String,
     pub project_id: String,
+    pub pid: Option<u32>,
     pub control_file: PathBuf,
     pub control_mode: RuntimeJobControlMode,
     pub child: Arc<tokio::sync::Mutex<Child>>,

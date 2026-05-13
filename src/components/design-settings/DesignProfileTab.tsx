@@ -19,11 +19,10 @@ export function DesignProfileTab({
   t,
 }: DesignProfileTabProps) {
   const motionLabel = t(settings.motionMode === "cinematic" ? "common.cinematic" : "common.minimal");
-  const cursorLabel = t(settings.cursorMode === "radar" ? "common.radar" : "common.system");
   const densityLabel = t(settings.densityMode === "compact" ? "common.compact" : "common.comfortable");
   const densityFeelLabel = settings.densityMode === "compact" ? t("design.tight") : t("design.roomy");
   const overlayLabel = settings.gridVisible ? t("design.visible") : t("design.muted");
-  const pointerLabel = settings.cursorMode === "radar" ? t("design.customOrbit") : t("design.nativeSystem");
+  const pointerLabel = t("design.nativeSystem");
   const motionFeelLabel = settings.motionMode === "cinematic" ? t("design.fullSignal") : t("design.reducedMotion");
 
   return (
@@ -100,10 +99,6 @@ export function DesignProfileTab({
               <div>
                 <span>{t("design.motion")}</span>
                 <strong>{motionLabel}</strong>
-              </div>
-              <div>
-                <span>{t("design.cursor")}</span>
-                <strong>{cursorLabel}</strong>
               </div>
               <div>
                 <span>{t("design.density")}</span>

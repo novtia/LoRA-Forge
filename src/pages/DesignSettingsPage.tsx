@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DesignInterfaceTab } from "../components/design-settings/DesignInterfaceTab";
 import { DesignLlmTab } from "../components/design-settings/DesignLlmTab";
+import { DesignTrainingEnvTab } from "../components/design-settings/DesignTrainingEnvTab";
 import { DesignPaletteTab } from "../components/design-settings/DesignPaletteTab";
 import { DesignProfileTab } from "../components/design-settings/DesignProfileTab";
 import { DesignSettingsHeader } from "../components/design-settings/DesignSettingsHeader";
@@ -30,10 +31,6 @@ export default function DesignSettingsPage() {
       {
         label: t("design.motion"),
         value: t(settings.motionMode === "cinematic" ? "common.cinematic" : "common.minimal"),
-      },
-      {
-        label: t("design.cursor"),
-        value: t(settings.cursorMode === "radar" ? "common.radar" : "common.system"),
       },
       {
         label: t("design.density"),
@@ -87,6 +84,8 @@ export default function DesignSettingsPage() {
             t={t}
           />
         )}
+
+        {activeTab === "training" && <DesignTrainingEnvTab t={t} />}
 
         {activeTab === "llm" && <DesignLlmTab language={language} t={t} />}
       </div>

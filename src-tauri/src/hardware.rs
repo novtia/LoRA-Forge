@@ -8,6 +8,16 @@ use serde::Deserialize;
 
 use crate::{error::AppResult, models::HardwareInfo, utils::now_ts};
 
+fn hidden_command(program: &str) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
+
 #[derive(Debug, Clone)]
 pub struct GpuRuntimeMetrics {
     pub gpu_name: String,
@@ -45,7 +55,7 @@ fn detect_hardware_info() -> Option<HardwareInfo> {
 }
 
 pub fn query_gpu_runtime_metrics() -> Option<GpuRuntimeMetrics> {
-    let output = Command::new("nvidia-smi")
+    let output = hidden_command("nvidia-smi")
         .args([
             "--query-gpu=name,temperature.gpu,utilization.gpu,memory.used,memory.total",
             "--format=csv,noheader,nounits",
@@ -79,7 +89,7 @@ pub fn query_gpu_runtime_metrics() -> Option<GpuRuntimeMetrics> {
 }
 
 fn detect_with_nvidia_smi() -> Option<HardwareInfo> {
-    let output = Command::new("nvidia-smi")
+    let output = hidden_command("nvidia-smi")
         .args([
             "--query-gpu=name,memory.total",
             "--format=csv,noheader,nounits",
@@ -108,7 +118,7 @@ fn detect_with_nvidia_smi() -> Option<HardwareInfo> {
 }
 
 fn detect_with_windows_video_controller() -> Option<HardwareInfo> {
-    let output = Command::new("powershell")
+    let output = hidden_command("powershell")
         .args([
             "-NoProfile",
             "-Command",

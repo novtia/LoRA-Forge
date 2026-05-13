@@ -91,9 +91,6 @@ export function DesignSettingsProvider({ children }: { children: ReactNode }) {
       root.style.setProperty(name, value);
     });
 
-    root.style.setProperty("--body-cursor", settings.cursorMode === "radar" ? "none" : "auto");
-    root.style.setProperty("--interactive-cursor", settings.cursorMode === "radar" ? "none" : "pointer");
-    root.style.setProperty("--precision-cursor", settings.cursorMode === "radar" ? "none" : "crosshair");
     root.dataset.designPreset = settings.presetId;
 
     body.classList.toggle("design-grid-hidden", !settings.gridVisible);

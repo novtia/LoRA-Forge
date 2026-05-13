@@ -4,10 +4,10 @@ import {
   Cpu,
   FolderOpen,
   Gauge,
+  Image as ImageIcon,
   Network,
   Settings2,
   Sliders,
-  TerminalSquare,
   Wrench,
   Zap,
 } from "lucide-react";
@@ -288,6 +288,104 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
             </div>
           </SectionCard>
 
+          <SectionCard title={t("config.sampleImages")} icon={<ImageIcon size={18} />} animationDelay="0.02s">
+            <div className="config-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+              <TextAreaField
+                label={t("config.samplePrompts")}
+                value={config.samplePrompts}
+                placeholder={t("config.samplePromptsPlaceholder")}
+                rows={4}
+                onChange={(value) => updateConfig("samplePrompts", value)}
+              />
+              <TextAreaField
+                label={t("config.sampleNegativePrompt")}
+                value={config.sampleNegativePrompt}
+                placeholder={t("config.sampleNegativePromptPlaceholder")}
+                rows={4}
+                onChange={(value) => updateConfig("sampleNegativePrompt", value)}
+              />
+            </div>
+            <div
+              style={{
+                marginTop: "0.45rem",
+                fontFamily: "var(--font-mono)",
+                fontSize: "0.72rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              {t("config.samplePromptsHint")}
+            </div>
+            <div className="config-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+              <NumberField
+                label={t("config.sampleEveryNSteps")}
+                value={config.sampleEveryNSteps}
+                onChange={(value) => updateConfig("sampleEveryNSteps", value)}
+              />
+              <NumberField
+                label={t("config.sampleEveryNEpochs")}
+                value={config.sampleEveryNEpochs}
+                onChange={(value) => updateConfig("sampleEveryNEpochs", value)}
+              />
+              <SelectField
+                label={t("config.sampleSampler")}
+                value={config.sampleSampler}
+                onChange={(value) => updateConfig("sampleSampler", value)}
+                options={[
+                  "ddim",
+                  "pndm",
+                  "lms",
+                  "euler",
+                  "euler_a",
+                  "heun",
+                  "dpm_2",
+                  "dpm_2_a",
+                  "dpmsolver",
+                  "dpmsolver++",
+                  "dpmsingle",
+                  "k_lms",
+                  "k_euler",
+                  "k_euler_a",
+                  "k_dpm_2",
+                  "k_dpm_2_a",
+                ]}
+              />
+            </div>
+            <div className="config-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", marginTop: "0.35rem" }}>
+              <NumberField
+                label={t("config.sampleWidth")}
+                value={config.sampleWidth}
+                onChange={(value) => updateConfig("sampleWidth", value)}
+              />
+              <NumberField
+                label={t("config.sampleHeight")}
+                value={config.sampleHeight}
+                onChange={(value) => updateConfig("sampleHeight", value)}
+              />
+              <NumberField
+                label={t("config.sampleSteps")}
+                value={config.sampleSteps}
+                onChange={(value) => updateConfig("sampleSteps", value)}
+              />
+              <NumberField
+                label={t("config.sampleSeed")}
+                value={config.sampleSeed}
+                onChange={(value) => updateConfig("sampleSeed", value)}
+              />
+            </div>
+            <div className="config-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)", marginTop: "0.35rem" }}>
+              <TextField
+                label={t("config.sampleCfgScale")}
+                value={config.sampleCfgScale}
+                onChange={(value) => updateConfig("sampleCfgScale", value)}
+              />
+              <ToggleSwitch
+                label={t("config.sampleAtFirst")}
+                active={config.sampleAtFirst}
+                onToggle={() => updateConfig("sampleAtFirst", !config.sampleAtFirst)}
+              />
+            </div>
+          </SectionCard>
+
           <SectionCard title={t("config.datasetLayout")} icon={<Box size={18} />} animationDelay="0.04s">
             <div className="config-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
               <NumberField
@@ -457,36 +555,6 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
             </div>
           </SectionCard>
 
-          <SectionCard title={t("config.trainerRuntime")} icon={<FolderOpen size={18} />} animationDelay="0.08s">
-            <div className="config-grid" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
-              <TextField
-                label={t("config.sdScriptsPath")}
-                value={config.sdScriptsPath}
-                placeholder={t("config.sdScriptsPathPlaceholder")}
-                onChange={(value) => updateConfig("sdScriptsPath", value)}
-              />
-              <TextField
-                label={t("config.pythonExecutable")}
-                value={config.pythonExecutable}
-                placeholder={t("config.pythonExecutablePlaceholder")}
-                onChange={(value) => updateConfig("pythonExecutable", value)}
-              />
-            </div>
-            <div
-              style={{
-                marginTop: "0.85rem",
-                fontFamily: "var(--font-mono)",
-                fontSize: "0.75rem",
-                color: "var(--text-muted)",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-              }}
-            >
-              <TerminalSquare size={14} />
-              {t("config.runtimeHint")}
-            </div>
-          </SectionCard>
         </>
       ) : null}
     </div>
@@ -536,6 +604,34 @@ function TextField({
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
+      />
+    </div>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+  rows = 4,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  rows?: number;
+}) {
+  return (
+    <div className="form-group">
+      <label className="form-label">{label}</label>
+      <textarea
+        className="form-input"
+        value={value}
+        placeholder={placeholder}
+        rows={rows}
+        onChange={(event) => onChange(event.target.value)}
+        style={{ resize: "vertical", minHeight: `${rows * 1.8}rem` }}
       />
     </div>
   );

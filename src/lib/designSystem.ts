@@ -5,13 +5,11 @@ export type DesignPresetId =
   | "velvet-reactor";
 
 export type MotionMode = "cinematic" | "minimal";
-export type CursorMode = "radar" | "system";
 export type DensityMode = "compact" | "comfortable";
 
 export interface DesignSettings {
   presetId: DesignPresetId;
   motionMode: MotionMode;
-  cursorMode: CursorMode;
   densityMode: DensityMode;
   gridVisible: boolean;
   noiseVisible: boolean;
@@ -174,7 +172,6 @@ export const DESIGN_PRESET_MAP = Object.fromEntries(
 export const DEFAULT_DESIGN_SETTINGS: DesignSettings = {
   presetId: "acid-forge",
   motionMode: "cinematic",
-  cursorMode: "radar",
   densityMode: "comfortable",
   gridVisible: true,
   noiseVisible: true,
@@ -192,10 +189,6 @@ export function sanitizeDesignSettings(input: unknown): DesignSettings {
       candidate.motionMode === "minimal" || candidate.motionMode === "cinematic"
         ? candidate.motionMode
         : DEFAULT_DESIGN_SETTINGS.motionMode,
-    cursorMode:
-      candidate.cursorMode === "system" || candidate.cursorMode === "radar"
-        ? candidate.cursorMode
-        : DEFAULT_DESIGN_SETTINGS.cursorMode,
     densityMode:
       candidate.densityMode === "compact" || candidate.densityMode === "comfortable"
         ? candidate.densityMode

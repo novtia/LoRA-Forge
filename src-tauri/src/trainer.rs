@@ -3,7 +3,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Stdio,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use rusqlite::OptionalExtension;
@@ -19,8 +19,8 @@ use crate::{
     hardware,
     models::{
         ActiveJobSummary, HardwareInfo, JobStatus, ProjectRecord, ProjectStatus, SystemStats,
-        TrainingConfig, TrainingLogEvent, TrainingProgressEvent, TrainingSnapshot,
-        TrainingStateChangedEvent,
+        TrainingConfig, TrainingEnvSettings, TrainingLogEvent, TrainingProgressEvent,
+        TrainingSnapshot, TrainingStateChangedEvent,
     },
     state::{AppState, RuntimeJob, RuntimeJobControlMode},
     utils::now_ts,
@@ -32,6 +32,19 @@ pub const TRAINING_STATE_EVENT: &str = "training-state-changed";
 pub const SYSTEM_STATS_EVENT: &str = "system-stats-updated";
 const STRUCTURED_LOG_PREFIX: &str = "@@LORA_FORGE_LOG@@";
 const STRUCTURED_LOG_SCHEMA: &str = "lora-forge.training.log/v1";
+const ABORT_GRACE_PERIOD: Duration = Duration::from_secs(3);
+const ABORT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000);
+    cmd
+}
+
+fn training_subprocess_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
+    tokio::process::Command::new(program)
+}
 
 #[derive(Default)]
 struct ParsedProgress {
@@ -124,12 +137,14 @@ pub async fn start_training(
         )));
     }
 
+    let env_settings = state.with_db(db::load_training_env)?;
+
     let job_id = format!("{}-{}", project.id, now_ts());
     let control_file = state.paths().jobs_dir.join(format!("{job_id}.control"));
     fs::write(&control_file, "running")?;
 
     let (mut command, control_mode) =
-        build_training_command(&state, &project, &config, &job_id, &control_file)?;
+        build_training_command(&state, &project, &config, &env_settings, &job_id)?;
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -181,6 +196,7 @@ pub async fn start_training(
     let runtime_job = RuntimeJob {
         job_id: job_id.clone(),
         project_id: project.id.clone(),
+        pid,
         control_file: control_file.clone(),
         control_mode,
         child: std::sync::Arc::new(tokio::sync::Mutex::new(child)),
@@ -269,13 +285,13 @@ fn build_training_command(
     state: &AppState,
     project: &ProjectRecord,
     config: &TrainingConfig,
+    env_settings: &TrainingEnvSettings,
     job_id: &str,
-    control_file: &Path,
 ) -> AppResult<(tokio::process::Command, RuntimeJobControlMode)> {
-    let sd_scripts_path = resolve_sd_scripts_path(config)?;
+    let sd_scripts_path = resolve_sd_scripts_path(env_settings)?;
     let train_script_path = resolve_training_script_path(config, &sd_scripts_path)?;
 
-    let python_executable = resolve_python_executable(config, &sd_scripts_path);
+    let python_executable = resolve_python_executable(env_settings, &sd_scripts_path);
     if looks_like_path(&python_executable) && !Path::new(&python_executable).exists() {
         return Err(AppError::Validation(format!(
             "Python executable was not found: '{}'",
@@ -305,15 +321,25 @@ fn build_training_command(
         .jobs_dir
         .join(format!("{job_id}.dataset.toml"));
     write_dataset_config(project, config, &dataset_config_path)?;
+    let sample_output_dir = PathBuf::from(&project.root_path).join("sample");
+    fs::create_dir_all(&sample_output_dir)?;
+    let sample_prompts_path = if sample_generation_enabled(config) {
+        let destination = state
+            .paths()
+            .jobs_dir
+            .join(format!("{job_id}.sample-prompts.json"));
+        write_sample_prompts_file(config, &destination)?;
+        Some(destination)
+    } else {
+        None
+    };
 
     let max_train_steps = config.epochs.saturating_mul(config.steps_per_epoch).max(1);
     let resolution = parse_resolution(&config.resolution)?;
-    let mut command = tokio::process::Command::new(&python_executable);
+    let mut command = training_subprocess_command(&python_executable);
     command
         .arg("-u")
         .arg(&train_script_path)
-        .arg("--lora_forge_control_file")
-        .arg(control_file)
         .arg("--dataset_config")
         .arg(&dataset_config_path)
         .arg("--pretrained_model_name_or_path")
@@ -354,6 +380,10 @@ fn build_training_command(
         .arg(".txt")
         .arg("--console_log_simple")
         .current_dir(&sd_scripts_path)
+        .env(
+            "LORA_FORGE_SAMPLE_DIR",
+            sample_output_dir.to_string_lossy().to_string(),
+        )
         .env("PYTHONUNBUFFERED", "1")
         .env("PYTHONIOENCODING", "utf-8");
 
@@ -440,6 +470,29 @@ fn build_training_command(
             .arg("--save_last_n_steps")
             .arg(config.save_last_n_steps.to_string());
     }
+    if config.sample_every_n_steps > 0 {
+        command
+            .arg("--sample_every_n_steps")
+            .arg(config.sample_every_n_steps.to_string());
+    }
+    if config.sample_at_first {
+        command.arg("--sample_at_first");
+    }
+    if config.sample_every_n_epochs > 0 {
+        command
+            .arg("--sample_every_n_epochs")
+            .arg(config.sample_every_n_epochs.to_string());
+    }
+    if let Some(sample_prompts_path) = &sample_prompts_path {
+        command
+            .arg("--sample_prompts")
+            .arg(sample_prompts_path);
+    }
+    if sample_generation_enabled(config) && !config.sample_sampler.trim().is_empty() {
+        command
+            .arg("--sample_sampler")
+            .arg(config.sample_sampler.trim());
+    }
     if !config.network_weights.trim().is_empty() {
         command
             .arg("--network_weights")
@@ -507,11 +560,11 @@ fn build_training_command(
         &config.lr_scheduler_power,
     )?;
 
-    Ok((command, RuntimeJobControlMode::ControlFile))
+    Ok((command, RuntimeJobControlMode::ProcessSignals))
 }
 
-fn resolve_sd_scripts_path(config: &TrainingConfig) -> AppResult<PathBuf> {
-    let configured = config.sd_scripts_path.trim();
+fn resolve_sd_scripts_path(env_settings: &TrainingEnvSettings) -> AppResult<PathBuf> {
+    let configured = env_settings.sd_scripts_path.trim();
     let candidate = if configured.is_empty() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
@@ -559,8 +612,8 @@ fn resolve_training_script_path(
     Ok(train_script_path)
 }
 
-fn resolve_python_executable(config: &TrainingConfig, sd_scripts_path: &Path) -> String {
-    let configured = config.python_executable.trim();
+fn resolve_python_executable(env_settings: &TrainingEnvSettings, sd_scripts_path: &Path) -> String {
+    let configured = env_settings.python_executable.trim();
     if !configured.is_empty() {
         return configured.to_string();
     }
@@ -735,6 +788,49 @@ fn split_argument_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn sample_generation_enabled(config: &TrainingConfig) -> bool {
+    config.sample_at_first || config.sample_every_n_steps > 0 || config.sample_every_n_epochs > 0
+}
+
+fn write_sample_prompts_file(config: &TrainingConfig, destination: &Path) -> AppResult<()> {
+    let prompts = config
+        .sample_prompts
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|prompt| {
+            let mut entry = serde_json::Map::new();
+            entry.insert("prompt".to_string(), Value::String(prompt.to_string()));
+            entry.insert("width".to_string(), Value::from(config.sample_width));
+            entry.insert("height".to_string(), Value::from(config.sample_height));
+            entry.insert("sample_steps".to_string(), Value::from(config.sample_steps));
+
+            let cfg_scale = config.sample_cfg_scale.trim().parse::<f64>().map_err(|_| {
+                AppError::Validation(format!(
+                    "Sample CFG scale must be a valid number, got '{}'",
+                    config.sample_cfg_scale.trim()
+                ))
+            })?;
+            entry.insert("scale".to_string(), Value::from(cfg_scale));
+
+            if !config.sample_negative_prompt.trim().is_empty() {
+                entry.insert(
+                    "negative_prompt".to_string(),
+                    Value::String(config.sample_negative_prompt.trim().to_string()),
+                );
+            }
+            if config.sample_seed > 0 {
+                entry.insert("seed".to_string(), Value::from(config.sample_seed));
+            }
+
+            Ok(Value::Object(entry))
+        })
+        .collect::<AppResult<Vec<_>>>()?;
+
+    fs::write(destination, serde_json::to_string_pretty(&prompts)?)?;
+    Ok(())
+}
+
 fn parse_resolution_dimensions(value: &str) -> AppResult<(u32, u32)> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -783,12 +879,9 @@ fn parse_resolution_dimensions(value: &str) -> AppResult<(u32, u32)> {
 }
 
 async fn set_process_suspended(runtime_job: &RuntimeJob, suspend: bool) -> AppResult<()> {
-    let pid = {
-        let child = runtime_job.child.lock().await;
-        child
-            .id()
-            .ok_or_else(|| AppError::Process("Trainer process is no longer running".to_string()))?
-    };
+    let pid = runtime_job
+        .pid
+        .ok_or_else(|| AppError::Process("Trainer process is no longer running".to_string()))?;
 
     #[cfg(target_os = "windows")]
     let mut command = {
@@ -797,7 +890,7 @@ async fn set_process_suspended(runtime_job: &RuntimeJob, suspend: bool) -> AppRe
         } else {
             "Resume-Process"
         };
-        let mut command = tokio::process::Command::new("powershell");
+        let mut command = hidden_command("powershell");
         command
             .arg("-NoProfile")
             .arg("-Command")
@@ -808,7 +901,7 @@ async fn set_process_suspended(runtime_job: &RuntimeJob, suspend: bool) -> AppRe
     #[cfg(not(target_os = "windows"))]
     let mut command = {
         let signal = if suspend { "-STOP" } else { "-CONT" };
-        let mut command = tokio::process::Command::new("kill");
+        let mut command = hidden_command("kill");
         command.arg(signal).arg(pid.to_string());
         command
     };
@@ -920,12 +1013,16 @@ pub async fn abort_training(
         Ok(())
     })?;
 
-    if matches!(
-        runtime_job.control_mode,
-        RuntimeJobControlMode::ProcessSignals
-    ) {
-        let mut child = runtime_job.child.lock().await;
-        child.kill().await?;
+    match runtime_job.control_mode {
+        RuntimeJobControlMode::ControlFile => {
+            let exited = wait_for_runtime_job_exit(&state, &runtime_job, ABORT_GRACE_PERIOD).await?;
+            if !exited {
+                force_kill_process(runtime_job.pid).await?;
+            }
+        }
+        RuntimeJobControlMode::ProcessSignals => {
+            force_kill_process(runtime_job.pid).await?;
+        }
     }
 
     emit_state_change(&app, project_id, &runtime_job.job_id, JobStatus::Aborted);
@@ -960,9 +1057,17 @@ async fn stream_logs<R>(
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let mut lines = BufReader::new(reader).lines();
+    let mut reader = BufReader::new(reader);
+    let mut buf = Vec::new();
 
-    while let Some(line) = lines.next_line().await? {
+    loop {
+        buf.clear();
+        let n = reader.read_until(b'\n', &mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        let text = String::from_utf8_lossy(&buf);
+        let line = text.trim_end_matches(['\r', '\n']);
         for segment in line.split('\r') {
             let normalized = segment.trim();
             if normalized.is_empty() {
@@ -1053,6 +1158,107 @@ async fn wait_for_child(runtime_job: RuntimeJob) -> AppResult<(Option<u32>, bool
     let pid = child.id();
     let status = child.wait().await?;
     Ok((pid, status.success()))
+}
+
+async fn wait_for_runtime_job_exit(
+    state: &AppState,
+    runtime_job: &RuntimeJob,
+    timeout: Duration,
+) -> AppResult<bool> {
+    let Some(pid) = runtime_job.pid else {
+        return Ok(true);
+    };
+
+    let deadline = Instant::now() + timeout;
+    loop {
+        if !is_process_running(pid).await? {
+            return Ok(true);
+        }
+
+        let active_job = state.runtime_job(&runtime_job.project_id)?;
+        if active_job
+            .as_ref()
+            .map(|job| job.job_id != runtime_job.job_id)
+            .unwrap_or(true)
+        {
+            return Ok(true);
+        }
+
+        if Instant::now() >= deadline {
+            return Ok(false);
+        }
+
+        tokio::time::sleep(ABORT_POLL_INTERVAL).await;
+    }
+}
+
+async fn force_kill_process(pid: Option<u32>) -> AppResult<()> {
+    let Some(pid) = pid else {
+        return Ok(());
+    };
+
+    if !is_process_running(pid).await? {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = hidden_command("taskkill");
+        command
+            .arg("/PID")
+            .arg(pid.to_string())
+            .arg("/T")
+            .arg("/F");
+        command
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let mut command = {
+        let mut command = hidden_command("kill");
+        command.arg("-KILL").arg(pid.to_string());
+        command
+    };
+
+    let status = command.status().await?;
+    if status.success() || !is_process_running(pid).await? {
+        Ok(())
+    } else {
+        Err(AppError::Process(format!(
+            "Failed to force-stop trainer process {pid}"
+        )))
+    }
+}
+
+async fn is_process_running(pid: u32) -> AppResult<bool> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = hidden_command("tasklist")
+            .arg("/FI")
+            .arg(format!("PID eq {pid}"))
+            .arg("/FO")
+            .arg("CSV")
+            .arg("/NH")
+            .output()
+            .await?;
+        if !output.status.success() {
+            return Err(AppError::Process(format!(
+                "Failed to inspect trainer process {pid}"
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Ok(stdout.lines().any(|line| line.starts_with('"')));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let status = hidden_command("kill")
+            .arg("-0")
+            .arg(pid.to_string())
+            .status()
+            .await?;
+        Ok(status.success())
+    }
 }
 
 fn finalize_job(
@@ -1156,7 +1362,7 @@ fn build_snapshot_from_progress(
         runtime_seconds,
         pid: state
             .runtime_job(project_id)?
-            .and_then(|job| futuresafe_pid(&job)),
+            .and_then(|job| job.pid),
         status: current_status(state, job_id)?,
     })
 }
@@ -1405,14 +1611,6 @@ fn bytes_to_gb(bytes: u64) -> f32 {
 
 fn read_control_state(path: &Path) -> AppResult<String> {
     Ok(fs::read_to_string(path)?.trim().to_string())
-}
-
-fn futuresafe_pid(runtime_job: &RuntimeJob) -> Option<u32> {
-    runtime_job
-        .child
-        .try_lock()
-        .ok()
-        .and_then(|child| child.id())
 }
 
 fn run_mock_trainer(args: &[String]) -> AppResult<()> {

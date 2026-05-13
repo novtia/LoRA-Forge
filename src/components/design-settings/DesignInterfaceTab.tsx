@@ -1,5 +1,5 @@
 import { Grid3X3, LayoutPanelTop, Monitor, MousePointer2, Palette, Sparkles, Waves } from "lucide-react";
-import type { CursorMode, DensityMode, DesignSettings, MotionMode } from "../../lib/designSystem";
+import type { DensityMode, DesignSettings, MotionMode } from "../../lib/designSystem";
 import type { SupportedLanguage, TranslateFn } from "../../lib/i18n";
 import { SegmentControl, ToggleRow } from "./DesignSettingsControls";
 
@@ -57,16 +57,6 @@ export function DesignInterfaceTab({
           </span>
         </div>
         <div style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: "1.5rem" }}>
-          <SegmentControl<CursorMode>
-            icon={<MousePointer2 size={16} />}
-            label={t("design.cursor")}
-            value={settings.cursorMode}
-            options={[
-              { value: "radar", label: t("common.radar") },
-              { value: "system", label: t("common.system") },
-            ]}
-            onChange={(value) => updateSettings({ cursorMode: value })}
-          />
           <SegmentControl<DensityMode>
             icon={<LayoutPanelTop size={16} />}
             label={t("design.density")}

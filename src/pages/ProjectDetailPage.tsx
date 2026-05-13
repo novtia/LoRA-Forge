@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
@@ -6,7 +6,6 @@ import {
   Settings2,
   Edit3,
   Image,
-  Pause,
   Play,
   Download,
   FlaskConical,
@@ -16,6 +15,7 @@ import {
 } from "lucide-react";
 import ConfigEditor from "../components/project/ConfigEditor";
 import DatasetEditor from "../components/project/DatasetEditor";
+import SampleImageViewer from "../components/project/SampleImageViewer";
 import TrainingConsolePanel from "../components/project/TrainingConsolePanel";
 import {
   abortTraining,
@@ -28,28 +28,34 @@ import {
   onTrainingLog,
   onTrainingProgress,
   onTrainingState,
-  pauseTraining,
-  resumeTraining,
   saveTrainingConfig,
   startTraining,
 } from "../lib/desktopApi";
 import FileAssetImage from "../components/FileAssetImage";
-import { canAbort, canResume, formatTimer } from "../lib/formatters";
+import { formatTimer } from "../lib/formatters";
 import { useI18n, type TranslateFn } from "../lib/i18n";
-import { appendTrainingLog, normalizeActiveJobLogs } from "../lib/trainingLogs";
+import { appendTrainingLog, dedupeTrainingLogs, normalizeActiveJobLogs } from "../lib/trainingLogs";
 import type {
   ActiveJobSummary,
   DatasetEntry,
+  JobStatus,
   TrainingConfig,
+  TrainingLogLine,
   TrainingSnapshot,
   ProjectRecord,
 } from "../lib/types";
 
-type ViewMode = "main" | "config" | "dataset";
+type ViewMode = "main" | "config" | "dataset" | "test";
 type BadgeVariant = "orange" | "acid" | "white";
+const TERMINAL_JOB_STATUSES: JobStatus[] = ["completed", "failed", "aborted", "interrupted"];
+
+function canStartFromStatus(status: JobStatus | null | undefined) {
+  return !status || TERMINAL_JOB_STATUSES.includes(status);
+}
 
 function badgeForView(view: ViewMode, t: TranslateFn): { variant: BadgeVariant; label: string } {
   if (view === "dataset") return { variant: "white", label: t("projectDetail.badge.dataset") };
+  if (view === "test") return { variant: "white", label: t("projectDetail.badge.test") };
   if (view === "config") return { variant: "acid", label: t("projectDetail.badge.config") };
   return { variant: "orange", label: t("projectDetail.badge.training") };
 }
@@ -111,6 +117,42 @@ function configSummary(config: TrainingConfig, t: TranslateFn) {
   if (config.saveEveryNSteps > 0) {
     summary.push({ key: t("config.saveEveryNSteps"), val: String(config.saveEveryNSteps) });
   }
+  if (config.sampleEveryNSteps > 0) {
+    summary.push({ key: t("config.sampleEveryNSteps"), val: String(config.sampleEveryNSteps) });
+  }
+  if (config.sampleEveryNEpochs > 0) {
+    summary.push({ key: t("config.sampleEveryNEpochs"), val: String(config.sampleEveryNEpochs) });
+  }
+  if (config.sampleAtFirst) {
+    summary.push({
+      key: t("config.sampleAtFirst"),
+      val: t("common.true"),
+      plain: true,
+    });
+  }
+  if (config.samplePrompts.trim()) {
+    const firstPrompt = config.samplePrompts
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find(Boolean);
+    if (firstPrompt) {
+      summary.push({ key: t("config.samplePrompts"), val: firstPrompt });
+    }
+  }
+  if (config.sampleEveryNSteps > 0 || config.sampleEveryNEpochs > 0 || config.sampleAtFirst) {
+    summary.push({
+      key: t("config.sampleSteps"),
+      val: String(config.sampleSteps),
+    });
+    summary.push({
+      key: t("config.sampleCfgScale"),
+      val: config.sampleCfgScale,
+    });
+    summary.push({
+      key: t("config.sampleSize"),
+      val: `${config.sampleWidth}x${config.sampleHeight}`,
+    });
+  }
   if (config.networkWeights.trim()) {
     summary.push({ key: t("config.networkWeights"), val: config.networkWeights });
   }
@@ -140,6 +182,8 @@ export default function ProjectDetailPage() {
   const [runtimeSeconds, setRuntimeSeconds] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [manualConsoleLogs, setManualConsoleLogs] = useState<TrainingLogLine[]>([]);
+  const manualLogSeqRef = useRef(-1);
   const projectId = id ?? "";
   const projectName = project?.name ?? projectId.replace(/-/g, "_");
 
@@ -164,6 +208,34 @@ export default function ProjectDetailPage() {
       }, 250);
     },
     [t, triggerScan],
+  );
+
+  const appendConsoleNotice = useCallback(
+    (
+      message: string,
+      options?: {
+        level?: TrainingLogLine["level"];
+        stage?: TrainingLogLine["stage"];
+      },
+    ) => {
+      const entry: TrainingLogLine = {
+        seq: manualLogSeqRef.current,
+        stream: "ui",
+        level: options?.level ?? "info",
+        channel: "rich",
+        kind: "ui_action",
+        stage: options?.stage ?? null,
+        code: null,
+        message,
+        metrics: null,
+        rawLine: null,
+        line: message,
+        createdAt: Math.floor(Date.now() / 1000),
+      };
+      manualLogSeqRef.current -= 1;
+      setManualConsoleLogs((current) => appendTrainingLog(current, entry, 40));
+    },
+    [],
   );
 
   const loadProjectData = useCallback(async () => {
@@ -266,6 +338,11 @@ export default function ProjectDetailPage() {
   }, [loadProjectData, projectId, t]);
 
   useEffect(() => {
+    setManualConsoleLogs([]);
+    manualLogSeqRef.current = -1;
+  }, [projectId]);
+
+  useEffect(() => {
     setBadge(badgeForView(view, t));
   }, [t, view]);
 
@@ -280,6 +357,18 @@ export default function ProjectDetailPage() {
 
   const snapshot = snapshotFromJob(job);
   const chartBars = chartBarsFromHistory(job?.history ?? []);
+  const consoleLogs = useMemo(
+    () =>
+      dedupeTrainingLogs(
+        [...(job?.recentLogs ?? []), ...manualConsoleLogs].sort((left, right) =>
+          left.createdAt === right.createdAt
+            ? left.seq - right.seq
+            : left.createdAt - right.createdAt,
+        ),
+      ),
+    [job?.recentLogs, manualConsoleLogs],
+  );
+  const canStartTraining = canStartFromStatus(job?.status);
   const imageEntries = useMemo(
     () => datasetEntries.filter((entry) => entry.kind === "image"),
     [datasetEntries],
@@ -327,37 +416,48 @@ export default function ProjectDetailPage() {
 
   const handlePrimaryAction = async () => {
     if (!projectId) return;
+    const shouldStartTraining = canStartFromStatus(job?.status);
     setBusyAction("primary");
     setError(null);
+    appendConsoleNotice(
+      shouldStartTraining
+        ? t("projectDetail.consoleStartRequested")
+        : t("projectDetail.consoleAbortRequested"),
+      {
+        level: shouldStartTraining ? "info" : "warn",
+        stage: shouldStartTraining ? "bootstrap" : "shutdown",
+      },
+    );
     try {
       let nextJob: ActiveJobSummary;
-      if (!job || ["completed", "failed", "aborted", "interrupted"].includes(job.status)) {
+      if (shouldStartTraining) {
         nextJob = await startTraining(projectId);
-      } else if (canResume(job.status)) {
-        nextJob = await resumeTraining(projectId);
       } else {
-        nextJob = await pauseTraining(projectId);
+        nextJob = await abortTraining(projectId);
       }
       setJob(normalizeActiveJobLogs(nextJob));
       setRuntimeSeconds(nextJob.runtimeSeconds);
+      appendConsoleNotice(
+        shouldStartTraining
+          ? t("projectDetail.consoleStartConfirmed")
+          : t("projectDetail.consoleAbortConfirmed"),
+        {
+          level: "success",
+          stage: shouldStartTraining ? "train_loop" : "shutdown",
+        },
+      );
       await loadProjectData();
     } catch (actionError) {
+      appendConsoleNotice(
+        shouldStartTraining
+          ? t("projectDetail.consoleStartFailed")
+          : t("projectDetail.consoleAbortFailed"),
+        {
+          level: "warn",
+          stage: shouldStartTraining ? "bootstrap" : "shutdown",
+        },
+      );
       setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
-    } finally {
-      setBusyAction(null);
-    }
-  };
-
-  const handleAbort = async () => {
-    if (!projectId) return;
-    setBusyAction("abort");
-    setError(null);
-    try {
-      const nextJob = await abortTraining(projectId);
-      setJob(normalizeActiveJobLogs(nextJob));
-      await loadProjectData();
-    } catch (abortError) {
-      setError(abortError instanceof Error ? abortError.message : t("errors.abortTrainer"));
     } finally {
       setBusyAction(null);
     }
@@ -399,17 +499,13 @@ export default function ProjectDetailPage() {
     switchView("main");
   };
 
-  const mainActionLabel = !job || ["completed", "failed", "aborted", "interrupted"].includes(job.status)
+  const mainActionLabel = canStartTraining
     ? t("projectDetail.start")
-    : canResume(job.status)
-      ? t("projectDetail.resume")
-      : t("projectDetail.pause");
+    : t("projectDetail.abort");
 
-  const MainActionIcon = !job || ["completed", "failed", "aborted", "interrupted"].includes(job.status)
+  const MainActionIcon = canStartTraining
     ? Play
-    : canResume(job.status)
-      ? Play
-      : Pause;
+    : Trash2;
 
   return (
     <div className="container page-detail">
@@ -438,21 +534,22 @@ export default function ProjectDetailPage() {
         <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
           {view === "main" ? (
             <div className="header-actions" style={{ display: "flex", gap: "0.5rem" }}>
-              <button className="btn" onClick={() => void handlePrimaryAction()} disabled={busyAction !== null}>
+              <button
+                className={
+                  !job || ["completed", "failed", "aborted", "interrupted"].includes(job.status)
+                    ? "btn"
+                    : "btn btn-danger"
+                }
+                onClick={() => void handlePrimaryAction()}
+                disabled={busyAction !== null}
+              >
                 <MainActionIcon size={16} /> {busyAction === "primary" ? t("common.working") : mainActionLabel}
               </button>
               <button className="btn btn-primary" onClick={() => void handleExport()} disabled={busyAction !== null}>
                 <Download size={16} /> {busyAction === "export" ? t("common.exporting") : t("common.export")}
               </button>
-              <button className="btn" disabled title={t("projectDetail.testComingSoon")}>
+              <button className="btn" onClick={() => switchView("test")}>
                 <FlaskConical size={16} /> {t("projectDetail.test")}
-              </button>
-              <button
-                className="btn btn-danger"
-                onClick={() => void handleAbort()}
-                disabled={!canAbort(job?.status) || busyAction !== null}
-              >
-                <Trash2 size={16} /> {busyAction === "abort" ? t("projectDetail.aborting") : t("projectDetail.abort")}
               </button>
             </div>
           ) : null}
@@ -639,7 +736,7 @@ export default function ProjectDetailPage() {
           </div>
 
           <TrainingConsolePanel
-            logs={job?.recentLogs ?? []}
+            logs={consoleLogs}
             title={t("projectDetail.stdout")}
             emptyLabel={t("projectDetail.trainerOutputPlaceholder")}
             formatClock={formatClock}
@@ -652,6 +749,13 @@ export default function ProjectDetailPage() {
         <ConfigEditor config={draftConfig} onChange={setDraftConfig} />
       ) : null}
       {view === "dataset" && projectId ? <DatasetEditor projectId={projectId} /> : null}
+      {view === "test" && projectId && draftConfig ? (
+        <SampleImageViewer
+          projectId={projectId}
+          config={draftConfig}
+          isTrainingActive={job?.status === "running"}
+        />
+      ) : null}
 
       {error ? (
         <div style={{ marginTop: "1rem", color: "var(--accent-orange)", fontFamily: "var(--font-mono)" }}>

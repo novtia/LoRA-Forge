@@ -1839,6 +1839,135 @@ textarea.form-input:focus {
   align-content: start;
 }
 
+.design-llm-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--grid-gap);
+  align-items: start;
+  /* 避免作为 .bento 子项时被默认 stretch 拉高，从而右侧 card 底部出现大块空白 */
+  align-self: start;
+  width: 100%;
+}
+
+.design-llm-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 1rem 0.85rem;
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius, 4px);
+  background: var(--bg-surface);
+}
+
+.design-llm-nav-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.design-llm-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.55rem 0.65rem;
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  transition: var(--transition);
+}
+
+.design-llm-nav-item:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.design-llm-nav-item.active {
+  color: var(--text-main);
+  border-color: var(--border-dim);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.design-llm-pane {
+  min-width: 0;
+  height: fit-content;
+  max-height: none;
+  justify-content: flex-start;
+}
+
+.design-llm-pane-body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+
+.design-llm-preset-row .form-input {
+  width: 100%;
+}
+
+/* 提示词编辑区：限制默认占位高度，避免右侧卡片视觉上被撑得过高 */
+.design-llm-prompt-textarea {
+  min-height: 10.5rem;
+  max-height: min(55vh, 28rem);
+}
+
+.design-llm-preset-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.design-llm-save-preset-box {
+  padding: 1rem;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+@media (max-width: 720px) {
+  .design-llm-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .design-llm-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .design-llm-nav-title {
+    width: 100%;
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+  }
+
+  .design-llm-nav-item {
+    flex: 1 1 auto;
+    min-width: 120px;
+  }
+}
+
 .design-header {
   margin-bottom: 0.15rem;
 }
@@ -2408,4 +2537,14 @@ textarea.form-input:focus {
 
 .fade-in-section {
   animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes lf-icon-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.lf-icon-spin {
+  animation: lf-icon-spin 0.75s linear infinite;
 }

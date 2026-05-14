@@ -109,6 +109,8 @@ export interface LlmSettings {
   systemPrompt: string;
   temperature: number;
   maxTokens: number;
+  /** Extra attempts after the first failed LLM caption (0 = no retry). Max 20. */
+  captionRetryMax: number;
 }
 
 export interface TrainingSnapshot {

@@ -2,25 +2,28 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderTree,
   FolderOpen,
-  Folder,
   Eye,
   Image,
   Tags,
   Bot,
-  Wand2,
   Save,
   Trash,
   ChevronLeft,
   ChevronRight,
   X,
   Settings2,
+  PlusCircle,
+  MinusCircle,
+  Loader2,
+  StopCircle,
 } from "lucide-react";
 import {
   autoTagImage,
+  cancelLlmCaption,
   deleteDatasetImage,
   getDatasetAsset,
-  interrogateImage,
   listDatasetEntries,
+  readCaption,
   writeCaption,
 } from "../../lib/desktopApi";
 import FileAssetImage from "../FileAssetImage";
@@ -30,6 +33,14 @@ import type { DatasetAsset, DatasetEntry } from "../../lib/types";
 interface DatasetEditorProps {
   projectId: string;
 }
+
+type BatchProgress = {
+  /** 1-based position in batch (currently running) */
+  current: number;
+  total: number;
+  currentName: string;
+  relativePath: string;
+};
 
 function getErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
@@ -50,6 +61,76 @@ function getErrorMessage(error: unknown, fallback: string): string {
   return fallback;
 }
 
+function isCaptionCancelledError(error: unknown): boolean {
+  return /LLM caption cancelled/i.test(getErrorMessage(error, ""));
+}
+
+/** 1-based image indices, inclusive; clamped to [1, total]. Returns null if input cannot be interpreted. */
+function parseBatchImageRange(raw: string, total: number): { start: number; end: number } | null {
+  if (total <= 0) return null;
+  const s = raw.trim();
+  if (!s) return null;
+
+  const full = s.match(/^(\d+)\s*-\s*(\d+)$/);
+  if (full) {
+    let a = parseInt(full[1], 10);
+    let b = parseInt(full[2], 10);
+    if (a > b) [a, b] = [b, a];
+    const start = Math.max(1, Math.min(a, total));
+    const end = Math.max(1, Math.min(b, total));
+    return start <= end ? { start, end } : { start: end, end: start };
+  }
+
+  const startOpen = s.match(/^(\d+)\s*-\s*$/);
+  if (startOpen) {
+    const a = Math.max(1, Math.min(parseInt(startOpen[1], 10), total));
+    return { start: a, end: total };
+  }
+
+  const endOpen = s.match(/^-\s*(\d+)$/);
+  if (endOpen) {
+    const b = Math.max(1, Math.min(parseInt(endOpen[1], 10), total));
+    return { start: 1, end: b };
+  }
+
+  const single = s.match(/^(\d+)$/);
+  if (single) {
+    const i = Math.max(1, Math.min(parseInt(single[1], 10), total));
+    return { start: i, end: i };
+  }
+
+  return null;
+}
+
+/** Returns new caption text, or null if file already has `tw` as the first tag. */
+function buildCaptionWithTriggerAtFront(existingTrimmed: string, tw: string): string | null {
+  if (!tw) return null;
+  if (!existingTrimmed) {
+    return tw;
+  }
+  const first = existingTrimmed.split(/[,，]/)[0]?.trim() ?? "";
+  if (first === tw) {
+    return null;
+  }
+  return `${tw}, ${existingTrimmed}`;
+}
+
+/**
+ * Removes every comma/ideographic-comma–separated segment that exactly equals `tw` (after trim).
+ * Returns null if the trigger does not appear as its own tag (file unchanged).
+ */
+function removeTriggerWordFromCaptionAllSegments(existingTrimmed: string, tw: string): string | null {
+  if (!tw || !existingTrimmed) {
+    return null;
+  }
+  const parts = existingTrimmed.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  const filtered = parts.filter((segment) => segment !== tw);
+  if (filtered.length === parts.length) {
+    return null;
+  }
+  return filtered.join(", ");
+}
+
 export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<DatasetEntry[]>([]);
@@ -61,6 +142,10 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   const [showBatchPanel, setShowBatchPanel] = useState(false);
   const [taggingMode, setTaggingMode] = useState<"all" | "range">("all");
   const [imageRange, setImageRange] = useState("");
+  const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+  const [triggerWord, setTriggerWord] = useState("");
+  /** Optional text sent to the LLM with the image to reduce mis-tags. */
+  const [llmUserHint, setLlmUserHint] = useState("");
   const assetRequestIdRef = useRef(0);
 
   const loadEntries = useCallback(async () => {
@@ -132,6 +217,12 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   }, [imageEntries]);
 
   const currentImage = selectedImageIndex >= 0 ? imageEntries[selectedImageIndex] ?? null : null;
+
+  const batchRangeHighlight = useMemo(() => {
+    if (!showBatchPanel || taggingMode !== "range") return null;
+    return parseBatchImageRange(imageRange, imageEntries.length);
+  }, [showBatchPanel, taggingMode, imageRange, imageEntries.length]);
+
   const previousImage = selectedImageIndex > 0 ? imageEntries[selectedImageIndex - 1] : null;
   const nextImage =
     selectedImageIndex >= 0 && selectedImageIndex < imageEntries.length - 1
@@ -201,22 +292,176 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     }
   };
 
-  const applyGeneratedCaption = async (mode: "llm" | "wd14") => {
+  const applyGeneratedCaption = async () => {
     if (!asset) return;
-    setBusy(mode);
+    setBusy("llm");
     setError(null);
+    const hint = llmUserHint.trim();
     try {
-      const nextCaption =
-        mode === "llm"
-          ? await autoTagImage(projectId, asset.relativePath)
-          : await interrogateImage(projectId, asset.relativePath);
+      const nextCaption = await autoTagImage(
+        projectId,
+        asset.relativePath,
+        hint.length > 0 ? hint : undefined,
+      );
       setCaption(nextCaption);
+      try {
+        await writeCaption(projectId, asset.relativePath, nextCaption);
+        await loadAsset(asset.relativePath);
+      } catch (saveError) {
+        setError(getErrorMessage(saveError, t("errors.saveCaption")));
+      }
     } catch (captionError) {
-      setError(getErrorMessage(captionError, t("errors.generateCaption")));
+      if (!isCaptionCancelledError(captionError)) {
+        setError(getErrorMessage(captionError, t("errors.generateCaption")));
+      }
     } finally {
       setBusy(null);
     }
   };
+
+  const runBatchTagging = useCallback(async () => {
+    if (imageEntries.length === 0 || busy !== null) return;
+
+    let targets: DatasetEntry[];
+    if (taggingMode === "all") {
+      targets = imageEntries;
+    } else {
+      const range = parseBatchImageRange(imageRange, imageEntries.length);
+      if (!range) {
+        setError(t("dataset.batchInvalidRange"));
+        return;
+      }
+      targets = imageEntries.slice(range.start - 1, range.end);
+    }
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    setBusy("batch-llm");
+    setError(null);
+    setBatchProgress(null);
+
+    let ok = 0;
+    let fail = 0;
+    let lastErr = "";
+    let userCancelled = false;
+
+    try {
+      for (let i = 0; i < targets.length; i++) {
+        const entry = targets[i];
+        setBatchProgress({
+          current: i + 1,
+          total: targets.length,
+          currentName: entry.name,
+          relativePath: entry.relativePath,
+        });
+
+        try {
+          const hint = llmUserHint.trim();
+          const nextCaption = await autoTagImage(
+            projectId,
+            entry.relativePath,
+            hint.length > 0 ? hint : undefined,
+          );
+          await writeCaption(projectId, entry.relativePath, nextCaption);
+          ok++;
+          if (currentImage?.relativePath === entry.relativePath) {
+            await loadAsset(entry.relativePath);
+          }
+        } catch (itemError) {
+          if (isCaptionCancelledError(itemError)) {
+            userCancelled = true;
+            break;
+          }
+          fail++;
+          lastErr = getErrorMessage(itemError, t("errors.generateCaption"));
+        }
+      }
+
+      if (userCancelled) {
+        setError(ok > 0 ? t("dataset.batchTaggingStoppedWithOk", { ok }) : t("dataset.batchTaggingStopped"));
+      } else if (fail > 0) {
+        const summary = t("dataset.batchTaggingSummary", { ok, fail });
+        setError(lastErr ? `${summary} ${lastErr}` : summary);
+      }
+    } finally {
+      setBatchProgress(null);
+      setBusy(null);
+    }
+  }, [
+    busy,
+    currentImage?.relativePath,
+    imageEntries,
+    imageRange,
+    loadAsset,
+    projectId,
+    taggingMode,
+    t,
+    llmUserHint,
+  ]);
+
+  const applyTriggerWordToAll = useCallback(async () => {
+    const tw = triggerWord.trim();
+    if (!tw) {
+      setError(t("dataset.triggerWordEmpty"));
+      return;
+    }
+    if (imageEntries.length === 0 || busy !== null) {
+      return;
+    }
+
+    setBusy("trigger-all");
+    setError(null);
+    try {
+      for (const entry of imageEntries) {
+        const raw = await readCaption(projectId, entry.relativePath);
+        const trimmed = raw.trim();
+        const next = buildCaptionWithTriggerAtFront(trimmed, tw);
+        if (next !== null) {
+          await writeCaption(projectId, entry.relativePath, next);
+        }
+      }
+      if (currentImage) {
+        await loadAsset(currentImage.relativePath);
+      }
+    } catch (e) {
+      setError(getErrorMessage(e, t("errors.applyTriggerWord")));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, currentImage, imageEntries, loadAsset, projectId, t, triggerWord]);
+
+  const removeTriggerWordFromAll = useCallback(async () => {
+    const tw = triggerWord.trim();
+    if (!tw) {
+      setError(t("dataset.triggerWordEmpty"));
+      return;
+    }
+    if (imageEntries.length === 0 || busy !== null) {
+      return;
+    }
+
+    setBusy("trigger-remove");
+    setError(null);
+    try {
+      for (const entry of imageEntries) {
+        const raw = await readCaption(projectId, entry.relativePath);
+        const trimmed = raw.trim();
+        const next = removeTriggerWordFromCaptionAllSegments(trimmed, tw);
+        if (next !== null) {
+          await writeCaption(projectId, entry.relativePath, next);
+        }
+      }
+      if (currentImage) {
+        await loadAsset(currentImage.relativePath);
+      }
+    } catch (e) {
+      setError(getErrorMessage(e, t("errors.removeTriggerWord")));
+    } finally {
+      setBusy(null);
+    }
+  }, [busy, currentImage, imageEntries, loadAsset, projectId, t, triggerWord]);
 
   return (
     <div className="bento bento-detail view-dataset">
@@ -252,25 +497,50 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
           {imageEntries.length === 0 ? (
             <div style={{ paddingLeft: "1.5rem" }}>{t("dataset.empty")}</div>
           ) : null}
-          {imageEntries.map((entry) => (
-            <div
-              key={entry.relativePath}
-              onClick={() => {
-                void openImage(entry.relativePath);
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "0.5rem",
-                paddingLeft: `${1.25 + entry.depth * 1.2}rem`,
-                cursor: "pointer",
-                color: entry.relativePath === asset?.relativePath ? "var(--text-main)" : undefined,
-              }}
-            >
-              <Image size={14} />
-              {entry.name}
-            </div>
-          ))}
+          {imageEntries.map((entry, imageIndex) => {
+            const oneBased = imageIndex + 1;
+            const inBatchRange =
+              batchRangeHighlight !== null &&
+              oneBased >= batchRangeHighlight.start &&
+              oneBased <= batchRangeHighlight.end;
+            const isSelected = entry.relativePath === asset?.relativePath;
+            const isBatchWorking =
+              busy === "batch-llm" &&
+              batchProgress !== null &&
+              entry.relativePath === batchProgress.relativePath;
+            return (
+              <div
+                key={entry.relativePath}
+                onClick={() => {
+                  void openImage(entry.relativePath);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.5rem",
+                  paddingLeft: `${1.25 + entry.depth * 1.2}rem`,
+                  paddingRight: "0.35rem",
+                  marginRight: "0.25rem",
+                  borderRadius: "4px",
+                  cursor: "pointer",
+                  color: isSelected ? "var(--text-main)" : undefined,
+                  backgroundColor: isBatchWorking
+                    ? "color-mix(in srgb, var(--accent-orange) 22%, transparent)"
+                    : inBatchRange
+                      ? "color-mix(in srgb, var(--accent-acid) 20%, transparent)"
+                      : undefined,
+                  boxShadow: isBatchWorking
+                    ? "inset 3px 0 0 var(--accent-orange)"
+                    : inBatchRange
+                      ? "inset 3px 0 0 var(--accent-acid)"
+                      : undefined,
+                }}
+              >
+                <Image size={14} />
+                {entry.name}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -342,7 +612,8 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
                 </div>
                 <button 
                   className="btn" 
-                  style={{ padding: "0.25rem", border: "none", background: "transparent" }} 
+                  style={{ padding: "0.25rem", border: "none", background: "transparent", opacity: busy === "batch-llm" ? 0.35 : 1 }} 
+                  disabled={busy === "batch-llm"}
                   onClick={() => setShowBatchPanel(false)}
                 >
                   <X size={16} />
@@ -363,6 +634,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
                       type="button"
                       className="btn"
                       aria-pressed={taggingMode === "all"}
+                      disabled={busy !== null}
                       onClick={() => setTaggingMode("all")}
                       style={{
                         justifyContent: "center",
@@ -385,6 +657,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
                       type="button"
                       className="btn"
                       aria-pressed={taggingMode === "range"}
+                      disabled={busy !== null}
                       onClick={() => setTaggingMode("range")}
                       style={{
                         justifyContent: "center",
@@ -414,6 +687,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
                       className="form-input" 
                       placeholder="1-100" 
                       value={imageRange}
+                      disabled={busy !== null}
                       onChange={(e) => setImageRange(e.target.value)}
                     />
                   </div>
@@ -422,12 +696,83 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
                 <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: taggingMode === "range" ? 0 : "-0.5rem" }}>
                   {t("dataset.totalImages", { total: imageEntries.length })}
                 </div>
+
+                {batchProgress ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <div style={{ fontSize: "0.8rem", color: "var(--text-main)", fontWeight: 500 }}>
+                      {t("dataset.batchTaggingProgress", {
+                        current: batchProgress.current,
+                        total: batchProgress.total,
+                      })}
+                    </div>
+                    <div
+                      style={{
+                        height: "6px",
+                        borderRadius: "3px",
+                        backgroundColor: "color-mix(in srgb, var(--text-muted) 28%, transparent)",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${
+                            batchProgress.total > 0
+                              ? (batchProgress.current / batchProgress.total) * 100
+                              : 0
+                          }%`,
+                          backgroundColor: "var(--accent-acid)",
+                          transition: "width 0.2s ease-out",
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.72rem",
+                        color: "var(--text-muted)",
+                        wordBreak: "break-all",
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {t("dataset.batchTaggingCurrent", { name: batchProgress.currentName })}
+                    </div>
+                  </div>
+                ) : null}
               </div>
               
               <div style={{ padding: "1rem", borderTop: "1px solid var(--border-dim)" }}>
-                <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: "0.75rem" }}>
-                  <Bot size={18} style={{ marginRight: "0.5rem" }}/> {t("dataset.startBatchTagging")}
-                </button>
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ flex: 1, justifyContent: "center", padding: "0.75rem" }}
+                    disabled={
+                      imageEntries.length === 0 || (busy !== null && busy !== "batch-llm")
+                    }
+                    onClick={() => void runBatchTagging()}
+                  >
+                    <Bot size={18} style={{ marginRight: "0.5rem" }} />{" "}
+                    {busy === "batch-llm" ? t("dataset.batchTaggingRunning") : t("dataset.startBatchTagging")}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-danger"
+                    style={{
+                      justifyContent: "center",
+                      padding: "0 0.85rem",
+                      flexShrink: 0,
+                      minWidth: "3rem",
+                    }}
+                    title={t("dataset.stopLlmCaption")}
+                    aria-label={t("dataset.stopLlmCaption")}
+                    disabled={busy !== "batch-llm"}
+                    onClick={() => {
+                      void cancelLlmCaption();
+                    }}
+                  >
+                    <StopCircle size={20} aria-hidden />
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -487,14 +832,27 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
             flex: 1,
           }}
         >
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "stretch" }}>
             <button
               className="btn btn-primary"
               style={{ flex: 1, justifyContent: "center", padding: "0.75rem" }}
-              disabled={!asset || busy !== null}
-              onClick={() => void applyGeneratedCaption("llm")}
+              disabled={!asset || (busy !== null && busy !== "llm")}
+              onClick={() => void applyGeneratedCaption()}
             >
               <Bot size={18} /> {busy === "llm" ? t("dataset.running") : t("dataset.autoTag")}
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              style={{ justifyContent: "center", padding: "0 0.85rem", flexShrink: 0, minWidth: "3rem" }}
+              title={t("dataset.stopLlmCaption")}
+              aria-label={t("dataset.stopLlmCaption")}
+              disabled={busy !== "llm"}
+              onClick={() => {
+                void cancelLlmCaption();
+              }}
+            >
+              <StopCircle size={20} aria-hidden />
             </button>
             <button
               className={`btn ${showBatchPanel ? "btn-primary" : ""}`}
@@ -505,14 +863,78 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
               <Settings2 size={18} />
             </button>
           </div>
-          <button
-            className="btn"
-            style={{ justifyContent: "center", padding: "0.75rem" }}
-            disabled={!asset || busy !== null}
-            onClick={() => void applyGeneratedCaption("wd14")}
-          >
-            <Wand2 size={18} /> {busy === "wd14" ? t("dataset.running") : t("dataset.interrogateWd14")}
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <label className="form-label">{t("dataset.llmUserHintLabel")}</label>
+            <textarea
+              className="form-input"
+              style={{ minHeight: "4.5rem", resize: "vertical" }}
+              placeholder={t("dataset.llmUserHintPlaceholder")}
+              value={llmUserHint}
+              disabled={busy !== null}
+              onChange={(e) => setLlmUserHint(e.target.value)}
+              spellCheck
+            />
+            <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+              {t("dataset.llmUserHintDesc")}
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+            <label className="form-label">{t("dataset.triggerWord")}</label>
+            <div style={{ display: "flex", alignItems: "stretch", gap: "0.5rem" }}>
+              <input
+                type="text"
+                className="form-input"
+                style={{ flex: 1, minWidth: 0 }}
+                placeholder={t("dataset.triggerWordPlaceholder")}
+                value={triggerWord}
+                disabled={busy !== null}
+                onChange={(e) => setTriggerWord(e.target.value)}
+                autoComplete="off"
+              />
+              <button
+                type="button"
+                className="btn btn-primary"
+                style={{
+                  justifyContent: "center",
+                  padding: "0 0.65rem",
+                  flexShrink: 0,
+                  alignSelf: "stretch",
+                  minWidth: "2.75rem",
+                }}
+                aria-label={t("dataset.applyTriggerWordAll")}
+                title={t("dataset.applyTriggerWordAll")}
+                disabled={imageEntries.length === 0 || busy !== null || !triggerWord.trim()}
+                onClick={() => void applyTriggerWordToAll()}
+              >
+                {busy === "trigger-all" ? (
+                  <Loader2 size={18} className="lf-icon-spin" aria-hidden />
+                ) : (
+                  <PlusCircle size={18} aria-hidden />
+                )}
+              </button>
+              <button
+                type="button"
+                className="btn btn-danger"
+                style={{
+                  justifyContent: "center",
+                  padding: "0 0.65rem",
+                  flexShrink: 0,
+                  alignSelf: "stretch",
+                  minWidth: "2.75rem",
+                }}
+                aria-label={t("dataset.removeTriggerWordAll")}
+                title={t("dataset.removeTriggerWordAll")}
+                disabled={imageEntries.length === 0 || busy !== null || !triggerWord.trim()}
+                onClick={() => void removeTriggerWordFromAll()}
+              >
+                {busy === "trigger-remove" ? (
+                  <Loader2 size={18} className="lf-icon-spin" aria-hidden />
+                ) : (
+                  <MinusCircle size={18} aria-hidden />
+                )}
+              </button>
+            </div>
+          </div>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "0.5rem" }}>
             <label className="form-label" style={{ marginTop: "0.5rem" }}>
               {t("dataset.rawTagText")}

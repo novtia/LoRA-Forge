@@ -120,12 +120,21 @@ export function deleteDatasetImage(
   return invoke("delete_dataset_image", { projectId, relativePath });
 }
 
-export function autoTagImage(projectId: string, relativePath: string): Promise<string> {
-  return invoke("auto_tag_image", { projectId, relativePath });
+export function autoTagImage(
+  projectId: string,
+  relativePath: string,
+  userMessage?: string | null,
+): Promise<string> {
+  const trimmed = userMessage?.trim();
+  return invoke("auto_tag_image", {
+    projectId,
+    relativePath,
+    userMessage: trimmed && trimmed.length > 0 ? trimmed : null,
+  });
 }
 
-export function interrogateImage(projectId: string, relativePath: string): Promise<string> {
-  return invoke("interrogate_image", { projectId, relativePath });
+export function cancelLlmCaption(): Promise<void> {
+  return invoke("cancel_llm_caption");
 }
 
 export function startTraining(projectId: string): Promise<ActiveJobSummary> {

@@ -1,14 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import {
   Box,
-  ChevronDown,
   Cpu,
   Download,
   FolderOpen,
   Gauge,
   Image as ImageIcon,
   Network,
+  Save,
   Settings2,
   Sliders,
   Upload,
@@ -22,9 +22,13 @@ import {
   DEFAULT_PRESETS,
   PRESET_GROUPS,
   applyPreset,
+  createUserTrainingPreset,
+  loadCustomPresetsFromStorage,
+  saveCustomPresetsToStorage,
   type TrainingPreset,
 } from "../../lib/presets";
 import { readTextFile, writeTextFile } from "../../lib/desktopApi";
+import { PresetDropdownMenu, type PresetMenuGroup } from "../PresetDropdownMenu";
 
 interface ConfigEditorProps {
   config: TrainingConfig;
@@ -38,7 +42,36 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
   const [presetError, setPresetError] = useState<string | null>(null);
+  const [customPresets, setCustomPresets] = useState<TrainingPreset[]>(() => loadCustomPresetsFromStorage());
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [savePresetName, setSavePresetName] = useState("");
+  const [savePresetError, setSavePresetError] = useState<string | null>(null);
   const isAnimaTraining = config.trainingScript === "anima_train_network.py";
+
+  const allPresets = useMemo(
+    () => [...DEFAULT_PRESETS, ...customPresets],
+    [customPresets],
+  );
+
+  const trainingPresetMenuGroups = useMemo((): PresetMenuGroup[] => {
+    const groups: PresetMenuGroup[] = PRESET_GROUPS.map((group) => ({
+      label: language === "zh-CN" ? group.labelZh : group.label,
+      items: DEFAULT_PRESETS.filter((p) => p.script === group.scriptMatch).map((p) => ({
+        id: p.id,
+        label: language === "zh-CN" ? p.labelZh : p.label,
+      })),
+    }));
+    if (customPresets.length > 0) {
+      groups.push({
+        label: t("config.presetGroupCustom"),
+        items: customPresets.map((p) => ({
+          id: p.id,
+          label: language === "zh-CN" ? p.labelZh : p.label,
+        })),
+      });
+    }
+    return groups;
+  }, [customPresets, language, t]);
 
   const updateConfig = <K extends keyof TrainingConfig>(key: K, value: TrainingConfig[K]) => {
     onChange({ ...config, [key]: value });
@@ -46,10 +79,33 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
 
   const handleApplyPreset = () => {
     if (!selectedPresetId) return;
-    const preset = DEFAULT_PRESETS.find((p) => p.id === selectedPresetId);
+    const preset = allPresets.find((p) => p.id === selectedPresetId);
     if (!preset) return;
     onChange(applyPreset(config, preset));
     setPresetError(null);
+  };
+
+  const confirmSaveNewPreset = () => {
+    const name = savePresetName.trim();
+    if (!name) {
+      setSavePresetError(t("config.presetNameRequired"));
+      return;
+    }
+    setSavePresetError(null);
+    const nextPreset = createUserTrainingPreset(name, config);
+    const nextList = [...customPresets, nextPreset];
+    setCustomPresets(nextList);
+    saveCustomPresetsToStorage(nextList);
+    setSelectedPresetId(nextPreset.id);
+    setSavePresetOpen(false);
+    setSavePresetName("");
+    setPresetError(null);
+  };
+
+  const openSavePresetDialog = () => {
+    setSavePresetName("");
+    setSavePresetError(null);
+    setSavePresetOpen(true);
   };
 
   const handleExportPreset = async () => {
@@ -83,11 +139,23 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
     }
   };
 
-  const selectedPreset: TrainingPreset | undefined = DEFAULT_PRESETS.find(
+  const selectedPreset: TrainingPreset | undefined = allPresets.find(
     (p) => p.id === selectedPresetId,
   );
 
+  useEffect(() => {
+    if (!savePresetOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setSavePresetOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [savePresetOpen]);
+
   return (
+    <>
     <div className="bento bento-detail view-config">
       <div
         className="card"
@@ -157,12 +225,15 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
             {t("config.preset")}
           </span>
 
-          {/* custom preset dropdown (native <select> can't be themed in WebView2) */}
-          <PresetDropdown
+          <PresetDropdownMenu
             value={selectedPresetId}
-            onChange={(v) => { setSelectedPresetId(v); setPresetError(null); }}
+            onChange={(v) => {
+              setSelectedPresetId(v);
+              setPresetError(null);
+            }}
             placeholder={t("config.presetPlaceholder")}
-            language={language}
+            groups={trainingPresetMenuGroups}
+            allowEmptyValue
           />
 
           <button
@@ -173,11 +244,30 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
             onClick={handleApplyPreset}
             title={
               selectedPreset
-                ? (language === "zh-CN" ? selectedPreset.descriptionZh : selectedPreset.description)
+                ? language === "zh-CN"
+                  ? selectedPreset.descriptionZh
+                  : selectedPreset.description
                 : undefined
             }
           >
             {t("config.presetApply")}
+          </button>
+
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{
+              height: "1.85rem",
+              padding: "0 0.6rem",
+              fontSize: "0.78rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.3rem",
+            }}
+            onClick={openSavePresetDialog}
+            title={t("config.presetSaveNew")}
+          >
+            <Save size={12} /> {t("config.presetSaveNew")}
           </button>
 
           <button
@@ -665,31 +755,8 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
               />
             </div>
           </SectionCard>
-        </>
-      ) : null}
 
-      {activeTab === "expert" ? (
-        <>
-          <SectionCard title={t("config.systemWorkers")} icon={<Cpu size={18} />} animationDelay="0s">
-            <div className="config-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-              <NumberField
-                label={t("config.maxDataLoaderWorkers")}
-                value={config.maxDataLoaderWorkers}
-                onChange={(value) => updateConfig("maxDataLoaderWorkers", value)}
-              />
-            </div>
-            <div className="config-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginTop: "0.35rem" }}>
-              <ToggleSwitch
-                label={t("config.persistentDataLoaderWorkers")}
-                active={config.persistentDataLoaderWorkers}
-                onToggle={() =>
-                  updateConfig("persistentDataLoaderWorkers", !config.persistentDataLoaderWorkers)
-                }
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard title={t("config.checkpointResume")} icon={<FolderOpen size={18} />} animationDelay="0.04s">
+          <SectionCard title={t("config.checkpointResume")} icon={<FolderOpen size={18} />} animationDelay="0.18s">
             <div className="config-grid" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
               <NumberField
                 label={t("config.saveEveryNSteps")}
@@ -732,188 +799,116 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
               />
             </div>
           </SectionCard>
+        </>
+      ) : null}
+
+      {activeTab === "expert" ? (
+        <>
+          <SectionCard title={t("config.systemWorkers")} icon={<Cpu size={18} />} animationDelay="0s">
+            <div className="config-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+              <NumberField
+                label={t("config.maxDataLoaderWorkers")}
+                value={config.maxDataLoaderWorkers}
+                onChange={(value) => updateConfig("maxDataLoaderWorkers", value)}
+              />
+            </div>
+            <div className="config-grid" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginTop: "0.35rem" }}>
+              <ToggleSwitch
+                label={t("config.persistentDataLoaderWorkers")}
+                active={config.persistentDataLoaderWorkers}
+                onToggle={() =>
+                  updateConfig("persistentDataLoaderWorkers", !config.persistentDataLoaderWorkers)
+                }
+              />
+            </div>
+          </SectionCard>
 
         </>
       ) : null}
     </div>
-  );
-}
-
-// ─── PresetDropdown ─────────────────────────────────────────────────────────
-// Fully custom dropdown rendered via Portal to escape any ancestor overflow:hidden.
-
-const GROUP_LABEL_STYLE: React.CSSProperties = {
-  padding: "0.35rem 0.75rem 0.15rem",
-  fontSize: "0.62rem",
-  fontFamily: "var(--font-mono)",
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-  color: "var(--accent-acid, #d4ff00)",
-  userSelect: "none",
-  pointerEvents: "none",
-};
-
-function DropdownItem({
-  onClick,
-  active,
-  children,
-}: {
-  onClick: () => void;
-  active: boolean;
-  children: ReactNode;
-}) {
-  const [hovered, setHovered] = useState(false);
-  const bg = active || hovered ? "rgba(255,255,255,0.07)" : "transparent";
-  return (
-    <div
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={{
-        padding: "0.38rem 0.75rem 0.38rem 1.25rem",
-        fontSize: "0.78rem",
-        color: active ? "var(--accent-acid, #d4ff00)" : "var(--text-primary, #e8e8e8)",
-        background: bg,
-        cursor: "pointer",
-        transition: "background 0.1s",
-        userSelect: "none",
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-function PresetDropdown({
-  value,
-  onChange,
-  placeholder,
-  language,
-}: {
-  value: string;
-  onChange: (id: string) => void;
-  placeholder: string;
-  language: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<DOMRect | null>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (
-        triggerRef.current?.contains(target) ||
-        panelRef.current?.contains(target)
-      ) return;
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const toggleOpen = () => {
-    if (!open && triggerRef.current) {
-      setRect(triggerRef.current.getBoundingClientRect());
-    }
-    setOpen((o) => !o);
-  };
-
-  const select = (id: string) => { onChange(id); setOpen(false); };
-
-  const selected = DEFAULT_PRESETS.find((p) => p.id === value);
-  const displayLabel = selected
-    ? (language === "zh-CN" ? selected.labelZh : selected.label)
-    : placeholder;
-
-  const panel = open && rect
-    ? createPortal(
-        <div
-          ref={panelRef}
-          className="preset-dropdown-panel"
-          style={{
-            position: "fixed",
-            top: rect.bottom + 3,
-            left: rect.left,
-            width: rect.width,
-            zIndex: 9999,
-            background: "var(--bg-card, #18181b)",
-            border: "1px solid var(--border-dim, #333)",
-            borderRadius: "5px",
-            boxShadow: "0 12px 32px rgba(0,0,0,0.75)",
-            maxHeight: "340px",
-            overflowY: "auto",
-            padding: "0.2rem 0",
-          }}
-        >
-          {/* placeholder / clear row */}
-          <DropdownItem active={!value} onClick={() => select("")}>
-            <span style={{ color: "var(--text-muted)" }}>{placeholder}</span>
-          </DropdownItem>
-
-          {PRESET_GROUPS.map((group) => {
-            const items = DEFAULT_PRESETS.filter((p) => p.script === group.scriptMatch);
-            return (
-              <div key={group.scriptMatch}>
-                <div style={GROUP_LABEL_STYLE}>
-                  {language === "zh-CN" ? group.labelZh : group.label}
-                </div>
-                {items.map((p) => (
-                  <DropdownItem key={p.id} active={p.id === value} onClick={() => select(p.id)}>
-                    {language === "zh-CN" ? p.labelZh : p.label}
-                  </DropdownItem>
-                ))}
+    {savePresetOpen
+      ? createPortal(
+          <div
+            role="presentation"
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0,0,0,0.55)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "1rem",
+            }}
+            onClick={() => setSavePresetOpen(false)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="preset-save-title"
+              className="card"
+              style={{
+                width: "100%",
+                maxWidth: "420px",
+                padding: "1.25rem",
+                background: "var(--bg-card, #1a1a1a)",
+                border: "1px solid var(--border-dim)",
+                borderRadius: "8px",
+                boxShadow: "0 20px 48px rgba(0,0,0,0.65)",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div
+                id="preset-save-title"
+                style={{ fontWeight: 700, marginBottom: "0.85rem", fontSize: "0.95rem" }}
+              >
+                {t("config.presetSaveDialogTitle")}
               </div>
-            );
-          })}
-        </div>,
-        document.body,
-      )
-    : null;
-
-  return (
-    <div style={{ position: "relative", flex: 1, minWidth: 0 }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={toggleOpen}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "0.4rem",
-          height: "1.85rem",
-          padding: "0 0.6rem",
-          fontSize: "0.78rem",
-          background: "var(--bg-input, var(--bg-surface))",
-          border: "1px solid var(--border-dim)",
-          borderRadius: "var(--radius-sm, 4px)",
-          color: selected ? "var(--text-primary)" : "var(--text-muted)",
-          cursor: "pointer",
-          textAlign: "left",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-        }}
-      >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", flex: 1 }}>
-          {displayLabel}
-        </span>
-        <ChevronDown
-          size={12}
-          style={{
-            flexShrink: 0,
-            opacity: 0.55,
-            transform: open ? "rotate(180deg)" : undefined,
-            transition: "transform 0.15s",
-          }}
-        />
-      </button>
-      {panel}
-    </div>
+              <label className="form-label" style={{ display: "block", marginBottom: "0.35rem" }}>
+                {t("config.presetNameLabel")}
+              </label>
+              <input
+                className="form-input"
+                style={{ width: "100%", marginBottom: savePresetError ? "0.35rem" : "1rem" }}
+                placeholder={t("config.presetNamePlaceholder")}
+                value={savePresetName}
+                onChange={(e) => {
+                  setSavePresetName(e.target.value);
+                  setSavePresetError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    confirmSaveNewPreset();
+                  }
+                }}
+                autoFocus
+              />
+              {savePresetError ? (
+                <div
+                  style={{
+                    fontSize: "0.72rem",
+                    color: "var(--accent-orange)",
+                    marginBottom: "0.75rem",
+                  }}
+                >
+                  {savePresetError}
+                </div>
+              ) : null}
+              <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+                <button type="button" className="btn" onClick={() => setSavePresetOpen(false)}>
+                  {t("common.cancel")}
+                </button>
+                <button type="button" className="btn btn-primary" onClick={() => void confirmSaveNewPreset()}>
+                  {t("common.save")}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )
+      : null}
+    </>
   );
 }
 

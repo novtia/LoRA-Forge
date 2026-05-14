@@ -1,4 +1,5 @@
 use std::{
+    cmp::Ordering,
     fs,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
@@ -32,6 +33,49 @@ pub fn slugify(input: &str) -> String {
     } else {
         slug
     }
+}
+
+/// String order where contiguous ASCII digit runs are compared by numeric value
+/// (e.g. `image (2).png` before `image (10).png`).
+pub fn cmp_str_natural(left: &str, right: &str) -> Ordering {
+    let left = left.as_bytes();
+    let right = right.as_bytes();
+    let mut i = 0usize;
+    let mut j = 0usize;
+    while i < left.len() && j < right.len() {
+        let lc = left[i];
+        let rc = right[j];
+        if lc.is_ascii_digit() && rc.is_ascii_digit() {
+            let (ln, li) = scan_ascii_u64(left, i);
+            let (rn, rj) = scan_ascii_u64(right, j);
+            match ln.cmp(&rn) {
+                Ordering::Equal => {
+                    i = li;
+                    j = rj;
+                }
+                ord => return ord,
+            }
+        } else {
+            match lc.cmp(&rc) {
+                Ordering::Equal => {
+                    i += 1;
+                    j += 1;
+                }
+                ord => return ord,
+            }
+        }
+    }
+    left.len().cmp(&right.len())
+}
+
+fn scan_ascii_u64(bytes: &[u8], start: usize) -> (u64, usize) {
+    let mut i = start;
+    let mut n: u64 = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        n = n.saturating_mul(10).saturating_add(u64::from(bytes[i] - b'0'));
+        i += 1;
+    }
+    (n, i)
 }
 
 pub fn normalize_relative_path(path: &Path) -> String {

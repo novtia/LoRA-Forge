@@ -17,7 +17,9 @@ use crate::{
     llm,
     models::{DatasetAsset, DatasetEntry, DatasetEntryKind, DatasetPreviewAsset, SampleImageEntry},
     state::AppState,
-    utils::{ensure_within, normalize_display_path, normalize_relative_path},
+    utils::{
+        cmp_str_natural, ensure_within, normalize_display_path, normalize_relative_path,
+    },
 };
 
 use serde::Deserialize;
@@ -118,22 +120,35 @@ pub fn delete_dataset_image(
 }
 
 #[tauri::command]
-pub async fn auto_tag_image(
-    project_id: String,
-    relative_path: String,
-    state: State<'_, AppState>,
-) -> Result<String, String> {
-    respond(generate_caption_inner(state.inner().clone(), &project_id, &relative_path, "llm").await)
+pub fn cancel_llm_caption(state: State<'_, AppState>) -> Result<(), String> {
+    state.request_llm_caption_cancel();
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn interrogate_image(
+pub async fn auto_tag_image(
     project_id: String,
     relative_path: String,
+    user_message: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
+    state.reset_llm_caption_cancel();
+    let user_message = user_message.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
     respond(
-        generate_caption_inner(state.inner().clone(), &project_id, &relative_path, "wd14").await,
+        generate_caption_inner(
+            state.inner().clone(),
+            &project_id,
+            &relative_path,
+            user_message.as_deref(),
+        )
+        .await,
     )
 }
 
@@ -146,7 +161,9 @@ fn list_dataset_entries_inner(state: AppState, project_id: &str) -> AppResult<Ve
 
     let mut entries = Vec::new();
     visit_dataset(&dataset_root, &dataset_root, 0, &mut entries)?;
-    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    entries.sort_by(|left, right| {
+        cmp_str_natural(&left.relative_path, &right.relative_path)
+    });
     Ok(entries)
 }
 
@@ -164,7 +181,7 @@ fn list_sample_images_inner(state: AppState, project_id: &str) -> AppResult<Vec<
         right
             .modified_at
             .cmp(&left.modified_at)
-            .then_with(|| left.relative_path.cmp(&right.relative_path))
+            .then_with(|| cmp_str_natural(&left.relative_path, &right.relative_path))
     });
     Ok(entries)
 }
@@ -337,8 +354,9 @@ async fn generate_caption_inner(
     state: AppState,
     project_id: &str,
     relative_path: &str,
-    mode: &str,
+    user_message: Option<&str>,
 ) -> AppResult<String> {
+    let cancel = state.llm_caption_cancel_flag();
     let (project, settings) = state.with_db(|connection| {
         Ok((
             db::get_project(connection, project_id)?,
@@ -348,7 +366,7 @@ async fn generate_caption_inner(
     let dataset_root = PathBuf::from(project.dataset_path);
     let image_path = resolve_dataset_path(&dataset_root, relative_path)?;
 
-    llm::generate_dataset_caption(&settings, &image_path, mode).await
+    llm::generate_dataset_caption(&settings, &image_path, user_message, &cancel).await
 }
 
 fn build_dataset_preview_requests(
@@ -556,7 +574,12 @@ fn visit_dataset(
 fn collect_images(root: &Path) -> AppResult<Vec<PathBuf>> {
     let mut images = Vec::new();
     visit_images(root, &mut images)?;
-    images.sort();
+    images.sort_by(|left, right| {
+        cmp_str_natural(
+            &left.to_string_lossy(),
+            &right.to_string_lossy(),
+        )
+    });
     Ok(images)
 }
 

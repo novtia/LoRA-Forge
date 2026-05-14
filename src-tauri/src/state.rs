@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use rusqlite::Connection;
@@ -47,6 +50,7 @@ struct AppStateInner {
     db: Mutex<Connection>,
     jobs: Mutex<HashMap<String, RuntimeJob>>,
     hardware_info: Mutex<HardwareInfo>,
+    llm_caption_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -80,8 +84,25 @@ impl AppState {
                 db: Mutex::new(connection),
                 jobs: Mutex::new(HashMap::new()),
                 hardware_info: Mutex::new(hardware_info),
+                llm_caption_cancel: Arc::new(AtomicBool::new(false)),
             }),
         })
+    }
+
+    pub fn llm_caption_cancel_flag(&self) -> Arc<AtomicBool> {
+        self.inner.llm_caption_cancel.clone()
+    }
+
+    pub fn reset_llm_caption_cancel(&self) {
+        self.inner
+            .llm_caption_cancel
+            .store(false, Ordering::SeqCst);
+    }
+
+    pub fn request_llm_caption_cancel(&self) {
+        self.inner
+            .llm_caption_cancel
+            .store(true, Ordering::SeqCst);
     }
 
     pub fn paths(&self) -> AppPaths {

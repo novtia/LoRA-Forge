@@ -192,6 +192,10 @@ pub struct TrainingEnvSettings {
     pub python_executable: String,
 }
 
+fn default_caption_retry_max() -> u32 {
+    3
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LlmSettings {
@@ -201,6 +205,9 @@ pub struct LlmSettings {
     pub system_prompt: String,
     pub temperature: f32,
     pub max_tokens: u32,
+    /// After the first failed LLM caption request, retry up to this many additional times (0 = no retry).
+    #[serde(default = "default_caption_retry_max")]
+    pub caption_retry_max: u32,
 }
 
 fn default_sd_scripts_path() -> String {
@@ -303,6 +310,7 @@ impl Default for LlmSettings {
                 .to_string(),
             temperature: 1.0,
             max_tokens: 8096,
+            caption_retry_max: default_caption_retry_max(),
         }
     }
 }
@@ -522,6 +530,9 @@ impl LlmSettings {
         }
         if self.max_tokens == 0 {
             return Err("Max tokens must be greater than zero".to_string());
+        }
+        if self.caption_retry_max > 20 {
+            return Err("Caption retry count must be between 0 and 20".to_string());
         }
         Ok(())
     }

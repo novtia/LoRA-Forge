@@ -24,6 +24,8 @@ pub enum AppError {
     Process(String),
     #[error("State error: {0}")]
     State(String),
+    #[error("LLM caption cancelled")]
+    Cancelled,
 }
 
 impl From<StripPrefixError> for AppError {

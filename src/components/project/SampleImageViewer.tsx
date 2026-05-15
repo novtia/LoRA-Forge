@@ -91,7 +91,7 @@ export default function SampleImageViewer({ projectId, config, isTrainingActive 
 
   return (
     <div className="bento bento-detail view-dataset">
-      <div className="card" style={{ gridColumn: "span 3", gridRow: "span 3", animationDelay: "0s" }}>
+      <div className="card" style={{ gridColumn: "span 2", gridRow: "span 3", animationDelay: "0s" }}>
         <div className="card-header">
           <span className="card-title-icon">
             <FolderOpen size={18} /> {t("projectDetail.sampleDirectory")}
@@ -222,7 +222,7 @@ export default function SampleImageViewer({ projectId, config, isTrainingActive 
         </div>
       </div>
 
-      <div className="card" style={{ gridColumn: "span 3", gridRow: "span 3", animationDelay: "0.08s" }}>
+      <div className="card" style={{ gridColumn: "span 4", gridRow: "span 3", animationDelay: "0.08s" }}>
         <div className="card-header">
           <span className="card-title-icon">
             <SlidersHorizontal size={18} /> {t("projectDetail.sampleParameters")}

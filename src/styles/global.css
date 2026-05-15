@@ -58,12 +58,20 @@
   box-sizing: border-box;
 }
 
+html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   background-color: var(--bg-base);
   color: var(--text-main);
   font-family: var(--font-display);
-  width: 1280px;
-  height: 720px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
   cursor: auto;
 }
@@ -71,8 +79,10 @@ body {
 #root {
   display: flex;
   flex-direction: column;
-  width: 1280px;
-  height: 720px;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -151,28 +161,39 @@ body {
 
 .app-content {
   flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel) {
+.app-content > .container {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  max-width: none;
+}
+
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel, .page-dashboard-home > .bento, .container.page-dashboard:not(.page-dashboard-home) > .bento, .design-bento) {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel, .page-dashboard-home > .bento, .container.page-dashboard:not(.page-dashboard-home) > .bento, .design-bento)::-webkit-scrollbar {
   width: var(--scrollbar-size);
   height: var(--scrollbar-size);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-track {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel, .page-dashboard-home > .bento, .container.page-dashboard:not(.page-dashboard-home) > .bento, .design-bento)::-webkit-scrollbar-track {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(0, 0, 0, 0.28));
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-thumb {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel, .page-dashboard-home > .bento, .container.page-dashboard:not(.page-dashboard-home) > .bento, .design-bento)::-webkit-scrollbar-thumb {
   min-height: 32px;
   border-radius: 999px;
   border: 2px solid var(--scrollbar-thumb-border);
@@ -181,12 +202,12 @@ body {
   box-shadow: 0 0 14px rgba(212, 255, 0, 0.12);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-thumb:hover {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel, .page-dashboard-home > .bento, .container.page-dashboard:not(.page-dashboard-home) > .bento, .design-bento)::-webkit-scrollbar-thumb:hover {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 85, 0, 0.82));
   box-shadow: 0 0 18px rgba(255, 85, 0, 0.2);
 }
 
-:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel)::-webkit-scrollbar-corner {
+:where(.app-content, .config-list, .terminal-content, .dataset-tree, textarea.form-input, .preset-dropdown-panel, .page-dashboard-home > .bento, .container.page-dashboard:not(.page-dashboard-home) > .bento, .design-bento)::-webkit-scrollbar-corner {
   background: transparent;
 }
 
@@ -259,7 +280,9 @@ body.design-motion-minimal *::after {
 
 .container {
   width: 100%;
-  max-width: 1280px;
+  max-width: none;
+  min-width: 0;
+  flex: 1 1 auto;
   padding: var(--page-padding-y) var(--page-padding-x);
   display: grid;
   grid-template-columns: 1fr;
@@ -270,12 +293,14 @@ body.design-motion-minimal *::after {
 
 .bento {
   display: grid;
-  grid-template-columns: repeat(12, 1fr);
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--grid-gap);
+  min-width: 0;
 }
 
 .bento-detail {
   gap: var(--detail-grid-gap);
+  min-width: 0;
 }
 
 /* Main training view: prog(auto) | chart+config(2x1fr) | dataset+terminal(2fr) */
@@ -302,8 +327,13 @@ body.design-motion-minimal *::after {
 .page-detail {
   display: flex !important;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
+}
+
+.page-detail > .detail-header {
+  flex-shrink: 0;
 }
 
 .page-detail > .bento-detail {
@@ -320,13 +350,36 @@ body.design-motion-minimal *::after {
   align-content: start;
 }
 
-.page-dashboard-home {
-  min-height: 100%;
+/* 项目列表等：标题固定，卡片网格占满剩余高度并可滚动 */
+.container.page-dashboard:not(.page-dashboard-home) {
+  display: flex !important;
+  flex-direction: column;
+  min-height: 0;
 }
 
-.page-dashboard-home > .bento {
-  min-height: 100%;
-  align-content: stretch;
+.container.page-dashboard:not(.page-dashboard-home) > .detail-header {
+  flex-shrink: 0;
+}
+
+.container.page-dashboard:not(.page-dashboard-home) > .bento {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
+}
+
+/* 主页：单列表格撑满视口高度，内容超出时在 bento 内滚动 */
+.container.page-dashboard.page-dashboard-home {
+  container-type: inline-size;
+  container-name: dash-home;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.container.page-dashboard.page-dashboard-home > .bento {
+  min-height: 0;
+  overflow-y: auto;
+  align-content: start;
 }
 
 /* ── Card System ───────────────────────────────────── */
@@ -835,6 +888,31 @@ body.design-motion-minimal *::after {
   display: contents;
 }
 
+/* 首页「最近项目」：按容器宽度决定列数（与 DashboardPage ResizeObserver 断点一致） */
+@container dash-home (max-width: 768px) {
+  .container.page-dashboard.page-dashboard-home .project-card {
+    grid-column: span 12;
+  }
+}
+
+@container dash-home (min-width: 769px) and (max-width: 1200px) {
+  .container.page-dashboard.page-dashboard-home .project-card {
+    grid-column: span 6;
+  }
+}
+
+@container dash-home (min-width: 1201px) and (max-width: 1559px) {
+  .container.page-dashboard.page-dashboard-home .project-card {
+    grid-column: span 4;
+  }
+}
+
+@container dash-home (min-width: 1560px) {
+  .container.page-dashboard.page-dashboard-home .project-card {
+    grid-column: span 3;
+  }
+}
+
 .proj-img-placeholder {
   width: 100%;
   height: 80px;
@@ -978,7 +1056,7 @@ html[lang="zh-CN"] .page-dashboard-home .proj-footer {
 
 .prog-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.75rem;
   margin-bottom: 0.35rem;
 }
@@ -1160,13 +1238,31 @@ html[lang="zh-CN"] .page-dashboard-home .proj-footer {
   overflow: visible;
 }
 
-.dataset-grid {
+.dataset-card .dataset-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 0.25rem;
+  width: 100%;
+  grid-template-columns: repeat(var(--ds-preview-cols, 6), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--ds-preview-rows, 2), minmax(0, 1fr));
+  gap: var(--ds-preview-gap, 4px);
+  justify-content: stretch;
+  align-content: stretch;
   flex: 1;
   min-height: 0;
   padding: 0.15rem 0;
+}
+
+.dataset-card .dataset-grid > .data-img {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  aspect-ratio: auto;
+}
+
+.dataset-card .dataset-grid > .dataset-preview-empty {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
 }
 
 .data-img {
@@ -1681,7 +1777,7 @@ textarea.form-input:focus {
     grid-column: span 12;
     flex-direction: row;
   }
-  .project-card {
+  .container.page-dashboard:not(.page-dashboard-home) .project-card {
     grid-column: span 6;
   }
   .chart-card,
@@ -1703,7 +1799,7 @@ textarea.form-input:focus {
 
 @media (max-width: 768px) {
   .sys-col,
-  .project-card {
+  .container.page-dashboard:not(.page-dashboard-home) .project-card {
     grid-column: span 12;
   }
   .quick-actions {
@@ -1727,9 +1823,6 @@ textarea.form-input:focus {
   }
   .prog-stats {
     grid-template-columns: 1fr;
-  }
-  .dataset-grid {
-    grid-template-columns: repeat(2, 1fr);
   }
   .config-grid {
     grid-template-columns: 1fr !important;
@@ -1833,15 +1926,26 @@ textarea.form-input:focus {
 .page-design {
   display: flex !important;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.page-design > .design-header,
+.page-design > .design-tabs-container {
+  flex-shrink: 0;
 }
 
 .design-bento {
   align-content: start;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .design-llm-shell {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: minmax(160px, clamp(200px, 18vw, 280px)) minmax(0, 1fr);
   gap: var(--grid-gap);
   align-items: start;
   /* 避免作为 .bento 子项时被默认 stretch 拉高，从而右侧 card 底部出现大块空白 */
@@ -1928,7 +2032,7 @@ textarea.form-input:focus {
 /* 提示词编辑区：限制默认占位高度，避免右侧卡片视觉上被撑得过高 */
 .design-llm-prompt-textarea {
   min-height: 10.5rem;
-  max-height: min(55vh, 28rem);
+  max-height: min(65vh, 36rem);
 }
 
 .design-llm-preset-actions {
@@ -2547,4 +2651,88 @@ textarea.form-input:focus {
 
 .lf-icon-spin {
   animation: lf-icon-spin 0.75s linear infinite;
+}
+
+/* Dataset editor: 原文 / 译文分区 */
+.lf-dataset-caption-zone {
+  border: 1px solid var(--border-dim);
+  border-radius: 6px;
+  padding: 0.55rem 0.65rem 0.65rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent), var(--bg-surface);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.lf-dataset-caption-zone--translated {
+  background: linear-gradient(180deg, rgba(212, 255, 0, 0.04), transparent), var(--bg-surface-alt);
+}
+
+.lf-dataset-caption-divider {
+  width: 2px;
+  flex-shrink: 0;
+  align-self: stretch;
+  border-radius: 1px;
+  background: linear-gradient(180deg, transparent, var(--border-dim) 12%, var(--border-dim) 88%, transparent);
+  opacity: 0.95;
+}
+
+/* 译文：单层 contenteditable + 分区 span，避免叠字错位 */
+.lf-dataset-caption-editor-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 12rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.lf-dataset-caption-editor-placeholder {
+  position: absolute;
+  inset: 0;
+  padding: 0.85rem 1rem;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+
+.lf-dataset-caption-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  resize: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  padding: 0.85rem 1rem;
+  position: relative;
+  z-index: 2;
+}
+
+.lf-dataset-caption-editor--behind-placeholder {
+  background: transparent !important;
+}
+
+.lf-dataset-caption-editor-partition {
+  background: color-mix(in srgb, var(--accent-acid) 26%, transparent);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  border-radius: 2px;
+}
+
+.lf-dataset-caption-editor:focus {
+  border-color: var(--accent-acid);
+}
+
+div.lf-dataset-caption-editor[contenteditable="false"] {
+  opacity: 0.88;
+  cursor: not-allowed;
 }

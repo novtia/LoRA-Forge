@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
+  Brain,
   Download,
+  Languages,
   MessageSquare,
   Sliders,
   Trash2,
@@ -24,7 +26,7 @@ import {
   LLM_PROMPT_AD_HOC,
   resolveSystemPrompt,
 } from "./DesignLlmConfig";
-import { loadLlmSettings, readTextFile, saveLlmSettings, writeTextFile } from "../../lib/desktopApi";
+import { loadBaiduTranslateSettings, loadLlmSettings, readTextFile, saveBaiduTranslateSettings, saveLlmSettings, writeTextFile } from "../../lib/desktopApi";
 import {
   applyLlmPromptPresetToSettings,
   createUserLlmPromptPreset,
@@ -36,8 +38,13 @@ import {
   type LlmPromptPreset,
 } from "../../lib/llmPromptPresets";
 import type { SupportedLanguage, TranslateFn } from "../../lib/i18n";
-import type { LlmSettings } from "../../lib/types";
+import type { LlmSettings, BaiduTranslateSettings } from "../../lib/types";
 import { PresetDropdownMenu, type PresetMenuGroup } from "../PresetDropdownMenu";
+import { ToggleRow } from "./DesignSettingsControls";
+
+function createDefaultBaiduTranslateSettings(): BaiduTranslateSettings {
+  return { appId: "", secretKey: "" };
+}
 
 interface DesignLlmTabProps {
   language: SupportedLanguage;
@@ -57,6 +64,7 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
   languageRef.current = language;
 
   const [settings, setSettings] = useState<LlmSettings>(() => createDefaultLlmSettings(language));
+  const [baiduSettings, setBaiduSettings] = useState<BaiduTranslateSettings>(() => createDefaultBaiduTranslateSettings());
   const [busyState, setBusyState] = useState<"loading" | "saving" | null>("loading");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<LlmSection>("connection");
@@ -97,8 +105,8 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     setBusyState("loading");
     setFeedback(null);
 
-    void loadLlmSettings()
-      .then((loaded) => {
+    void Promise.all([loadLlmSettings(), loadBaiduTranslateSettings()])
+      .then(([loaded, baiduLoaded]) => {
         if (cancelled) return;
         const lang = languageRef.current;
         const resolvedPrompt = resolveSystemPrompt(loaded.systemPrompt, lang);
@@ -112,6 +120,11 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
             typeof loaded.captionRetryMax === "number" && !Number.isNaN(loaded.captionRetryMax)
               ? Math.min(20, Math.max(0, loaded.captionRetryMax))
               : DEFAULT_LLM_CAPTION_RETRY_MAX,
+          thinkingEnabled: typeof loaded.thinkingEnabled === "boolean" ? loaded.thinkingEnabled : false,
+        });
+        setBaiduSettings({
+          ...createDefaultBaiduTranslateSettings(),
+          ...baiduLoaded,
         });
         setPromptPresetSelection(inferLlmPromptPresetSelection(resolvedPrompt, lang, initialCustom));
       })
@@ -159,6 +172,7 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
       setBusyState("saving");
       setFeedback(null);
       const saved = await saveLlmSettings(settings);
+      await saveBaiduTranslateSettings(baiduSettings);
       setSettings((current) => ({
         ...current,
         ...saved,
@@ -167,6 +181,7 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
           typeof saved.captionRetryMax === "number" && !Number.isNaN(saved.captionRetryMax)
             ? Math.min(20, Math.max(0, saved.captionRetryMax))
             : DEFAULT_LLM_CAPTION_RETRY_MAX,
+        thinkingEnabled: typeof saved.thinkingEnabled === "boolean" ? saved.thinkingEnabled : false,
       }));
       setFeedback(t("design.connectionSaved"));
     } catch (error) {
@@ -336,6 +351,53 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
                   </div>
                 );
               })}
+
+              <div
+                style={{
+                  marginTop: "1.5rem",
+                  paddingTop: "1.25rem",
+                  borderTop: "1px solid var(--border-dim)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "1rem",
+                }}
+              >
+                <div className="form-label" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                  <Languages size={16} /> {t("design.baiduTranslateHeading")}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t("design.baiduAppId")}</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    autoComplete="off"
+                    value={baiduSettings.appId}
+                    onChange={(event) =>
+                      setBaiduSettings((current) => ({ ...current, appId: event.target.value }))
+                    }
+                    disabled={loading}
+                  />
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                    {t("design.baiduAppIdDesc")}
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">{t("design.baiduSecretKey")}</label>
+                  <input
+                    type="password"
+                    className="form-input"
+                    autoComplete="new-password"
+                    value={baiduSettings.secretKey}
+                    onChange={(event) =>
+                      setBaiduSettings((current) => ({ ...current, secretKey: event.target.value }))
+                    }
+                    disabled={loading}
+                  />
+                  <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+                    {t("design.baiduSecretKeyDesc")}
+                  </div>
+                </div>
+              </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
                 <button type="button" className="btn" onClick={() => void handleSave()} disabled={busyState !== null}>
@@ -543,6 +605,15 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
                 />
                 <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>{t("design.maxTokensDesc")}</div>
               </div>
+
+              <ToggleRow
+                icon={<Brain size={16} />}
+                label={t("design.llmThinking")}
+                description={t("design.llmThinkingDesc")}
+                checked={settings.thinkingEnabled}
+                disabled={loading}
+                onToggle={() => updateSetting("thinkingEnabled", !settings.thinkingEnabled)}
+              />
 
               <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                 <div

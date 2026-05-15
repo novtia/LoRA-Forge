@@ -147,5 +147,6 @@ export function createDefaultLlmSettings(language: SupportedLanguage): LlmSettin
     temperature: DEFAULT_LLM_TEMPERATURE,
     maxTokens: DEFAULT_LLM_MAX_TOKENS,
     captionRetryMax: DEFAULT_LLM_CAPTION_RETRY_MAX,
+    thinkingEnabled: false,
   };
 }

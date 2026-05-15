@@ -366,7 +366,7 @@ async fn generate_caption_inner(
     let dataset_root = PathBuf::from(project.dataset_path);
     let image_path = resolve_dataset_path(&dataset_root, relative_path)?;
 
-    llm::generate_dataset_caption(&settings, &image_path, user_message, &cancel).await
+    llm::generate_dataset_caption(&settings, &image_path, user_message, &cancel, Some(state.clone())).await
 }
 
 fn build_dataset_preview_requests(

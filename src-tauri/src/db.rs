@@ -3,8 +3,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::{
     error::{AppError, AppResult},
     models::{
-        ActiveJobSummary, JobStatus, LlmSettings, LossPoint, ProjectRecord, ProjectStatus,
-        TrainingConfig, TrainingEnvSettings, TrainingLogLine, TrainingSnapshot,
+        ActiveJobSummary, BaiduTranslateSettings, JobStatus, LlmSettings, LossPoint, ProjectRecord,
+        ProjectStatus, TrainingConfig, TrainingEnvSettings, TrainingLogLine, TrainingSnapshot,
     },
     utils::{normalize_display_path_string, now_ts},
 };
@@ -40,6 +40,13 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
         );
 
         CREATE TABLE IF NOT EXISTS llm_settings (
+            id TEXT PRIMARY KEY,
+            config_json TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS baidu_translate_settings (
             id TEXT PRIMARY KEY,
             config_json TEXT NOT NULL,
             version INTEGER NOT NULL DEFAULT 1,
@@ -323,6 +330,43 @@ pub fn load_llm_settings(connection: &Connection) -> AppResult<LlmSettings> {
     match maybe_json {
         Some(config_json) => Ok(serde_json::from_str(&config_json)?),
         None => Ok(LlmSettings::default()),
+    }
+}
+
+pub fn save_baidu_translate_settings(
+    connection: &Connection,
+    settings: &BaiduTranslateSettings,
+) -> AppResult<()> {
+    let config_json = serde_json::to_string(settings)?;
+    connection.execute(
+        "
+        INSERT INTO baidu_translate_settings (id, config_json, version, updated_at)
+        VALUES ('global', ?1, 1, ?2)
+        ON CONFLICT(id) DO UPDATE SET
+            config_json = excluded.config_json,
+            version = baidu_translate_settings.version + 1,
+            updated_at = excluded.updated_at
+        ",
+        params![config_json, now_ts()],
+    )?;
+
+    Ok(())
+}
+
+pub fn load_baidu_translate_settings(
+    connection: &Connection,
+) -> AppResult<BaiduTranslateSettings> {
+    let maybe_json = connection
+        .query_row(
+            "SELECT config_json FROM baidu_translate_settings WHERE id = 'global'",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    match maybe_json {
+        Some(config_json) => Ok(serde_json::from_str(&config_json)?),
+        None => Ok(BaiduTranslateSettings::default()),
     }
 }
 

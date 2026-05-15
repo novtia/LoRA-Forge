@@ -1,3 +1,5 @@
+pub mod api_log;
+pub mod baidu_translate;
 pub mod config;
 pub mod dataset;
 pub mod projects;

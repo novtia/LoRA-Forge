@@ -15,7 +15,9 @@
         "title": "锻模工坊",
         "width": 1280,
         "height": 720,
-        "resizable": false,
+        "minWidth": 880,
+        "minHeight": 560,
+        "resizable": true,
         "fullscreen": false,
         "decorations": false
       }

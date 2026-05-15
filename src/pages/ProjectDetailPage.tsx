@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ChevronLeft,
@@ -48,6 +56,23 @@ import type {
 type ViewMode = "main" | "config" | "dataset" | "test";
 type BadgeVariant = "orange" | "acid" | "white";
 const TERMINAL_JOB_STATUSES: JobStatus[] = ["completed", "failed", "aborted", "interrupted"];
+
+/** 仅用于推算行列数：格子在 CSS 中用 1fr 拉伸铺满容器 */
+const DATASET_PREVIEW_MIN_CELL_PX = 56;
+const DATASET_PREVIEW_GAP_PX = 4;
+
+function datasetPreviewGridDimensions(
+  innerWidthPx: number,
+  innerHeightPx: number,
+): { cols: number; rows: number } {
+  const minCell = DATASET_PREVIEW_MIN_CELL_PX;
+  const gap = DATASET_PREVIEW_GAP_PX;
+  const pitch = minCell + gap;
+  const cols = Math.max(1, Math.floor((innerWidthPx + gap) / pitch));
+  const h = innerHeightPx >= pitch ? innerHeightPx : pitch;
+  const rows = Math.max(1, Math.floor((h + gap) / pitch));
+  return { cols, rows };
+}
 
 function canStartFromStatus(status: JobStatus | null | undefined) {
   return !status || TERMINAL_JOB_STATUSES.includes(status);
@@ -204,6 +229,8 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [manualConsoleLogs, setManualConsoleLogs] = useState<TrainingLogLine[]>([]);
   const manualLogSeqRef = useRef(-1);
+  const datasetPreviewGridRef = useRef<HTMLDivElement>(null);
+  const [datasetPreviewGridDims, setDatasetPreviewGridDims] = useState({ cols: 6, rows: 2 });
   const projectId = id ?? "";
   const projectName = project?.name ?? projectId.replace(/-/g, "_");
 
@@ -394,7 +421,39 @@ export default function ProjectDetailPage() {
     [datasetEntries],
   );
   const imageCount = imageEntries.length;
-  const datasetPreviewEntries = useMemo(() => imageEntries.slice(0, 11), [imageEntries]);
+  const datasetPreviewSlots = datasetPreviewGridDims.cols * datasetPreviewGridDims.rows;
+
+  const datasetPreviewEntries = useMemo(() => {
+    const total = imageEntries.length;
+    if (total === 0) return [];
+    const maxImages =
+      total <= datasetPreviewSlots ? total : Math.max(0, datasetPreviewSlots - 1);
+    return imageEntries.slice(0, maxImages);
+  }, [imageEntries, datasetPreviewSlots]);
+
+  const datasetPreviewOverflowCount =
+    imageCount > datasetPreviewSlots ? imageCount - datasetPreviewEntries.length : 0;
+
+  useLayoutEffect(() => {
+    if (view !== "main") return;
+    const node = datasetPreviewGridRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+
+    const measure = () => {
+      const width = node.clientWidth;
+      const height = node.clientHeight;
+      const next = datasetPreviewGridDimensions(width, height);
+      setDatasetPreviewGridDims((prev) =>
+        prev.cols === next.cols && prev.rows === next.rows ? prev : next,
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [view]);
+
   const configItems = useMemo(() => (draftConfig ? configSummary(draftConfig, t) : []), [draftConfig, t]);
 
   useEffect(() => {
@@ -724,7 +783,17 @@ export default function ProjectDetailPage() {
               </span>
               <span>{t("dataset.imageCount", { count: imageCount })}</span>
             </div>
-            <div className="dataset-grid">
+            <div
+              ref={datasetPreviewGridRef}
+              className="dataset-grid"
+              style={
+                {
+                  "--ds-preview-cols": datasetPreviewGridDims.cols,
+                  "--ds-preview-rows": datasetPreviewGridDims.rows,
+                  "--ds-preview-gap": `${DATASET_PREVIEW_GAP_PX}px`,
+                } as CSSProperties
+              }
+            >
               {datasetPreviewEntries.length > 0 ? (
                 datasetPreviewEntries.map((entry) => (
                   <FileAssetImage
@@ -738,18 +807,23 @@ export default function ProjectDetailPage() {
                   />
                 ))
               ) : (
-                <FileAssetImage className="data-img" alt={t("projectDetail.datasetPlaceholder")} fit="cover" showOverlay />
+                <FileAssetImage
+                  className="data-img dataset-preview-empty"
+                  alt={t("projectDetail.datasetPlaceholder")}
+                  fit="cover"
+                  showOverlay
+                />
               )}
-              {imageCount > 11 ? (
+              {datasetPreviewOverflowCount > 0 ? (
                 <div
-                  className="data-img"
+                  className="data-img data-img-overflow-more"
                   style={{
                     color: "var(--text-muted)",
                     fontFamily: "var(--font-mono)",
                     fontSize: "0.85rem",
                   }}
                 >
-                  +{imageCount - 11}
+                  +{datasetPreviewOverflowCount}
                 </div>
               ) : null}
             </div>

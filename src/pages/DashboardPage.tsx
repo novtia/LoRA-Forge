@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -37,7 +37,21 @@ import { appendTrainingLog, normalizeActiveJobLogs } from "../lib/trainingLogs";
 import { TrainingConsoleLine } from "../components/project/TrainingConsolePanel";
 import type { ActiveJobSummary, ProjectRecord, SystemStats } from "../lib/types";
 
-const VISIBLE_COUNT = 2;
+/** 与首页 `.container.page-dashboard.page-dashboard-home` 的容器查询列宽一致 */
+function recentProjectSlotsForWidth(containerWidthPx: number): number {
+  if (containerWidthPx <= 768) return 1;
+  if (containerWidthPx <= 1200) return 2;
+  if (containerWidthPx <= 1559) return 3;
+  return 4;
+}
+
+/** 单行「最近项目」：优先铺满一行；若仍有隐藏项则保留一格给「更多」卡片 */
+function visibleRecentProjectCount(projectCount: number, slotsPerRow: number): number {
+  if (projectCount <= 0) return 0;
+  if (projectCount <= slotsPerRow) return projectCount;
+  const maxProjectsWithMore = Math.max(1, slotsPerRow - 1);
+  return maxProjectsWithMore;
+}
 
 function statusIcon(status: ProjectRecord["status"]) {
   if (status === "error" || status === "aborted") {
@@ -68,6 +82,30 @@ export default function DashboardPage() {
   const [projectPath, setProjectPath] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [recentRowSlots, setRecentRowSlots] = useState(3);
+  const dashboardHomeContainerRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const node = dashboardHomeContainerRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+
+    const measure = () => {
+      const width = node.getBoundingClientRect().width;
+      setRecentRowSlots(recentProjectSlotsForWidth(width));
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  const visibleRecentCount = useMemo(
+    () => visibleRecentProjectCount(projects.length, recentRowSlots),
+    [projects.length, recentRowSlots],
+  );
+
+  const hiddenRecentCount = projects.length - visibleRecentCount;
 
   const refreshProjects = useCallback(async () => {
     setProjects(await listProjects());
@@ -211,7 +249,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="container page-dashboard page-dashboard-home">
+    <div className="container page-dashboard page-dashboard-home" ref={dashboardHomeContainerRef}>
       <div className="bento">
         <div className="card sys-col">
           <div className="card-header">
@@ -411,7 +449,7 @@ export default function DashboardPage() {
           <Archive size={20} /> {t("dashboard.recentForges")}
         </div>
 
-        {projects.slice(0, VISIBLE_COUNT).map((project, index) => (
+        {projects.slice(0, visibleRecentCount).map((project, index) => (
           <Link key={project.id} to={`/project/${project.id}`} className="project-card-link">
             <div className={`card project-card ${projectAccent(project, index)}`}>
               <div className="card-header">
@@ -463,11 +501,11 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {projects.length > VISIBLE_COUNT ? (
+        {hiddenRecentCount > 0 ? (
           <Link to="/projects" className="project-card-link">
             <div className="card project-card card-more">
               <div className="card-more-inner">
-                <div className="card-more-count">+{projects.length - VISIBLE_COUNT}</div>
+                <div className="card-more-count">+{hiddenRecentCount}</div>
                 <div className="card-more-label">{t("dashboard.moreProjects")}</div>
                 <ArrowRight size={18} className="card-more-arrow" />
               </div>

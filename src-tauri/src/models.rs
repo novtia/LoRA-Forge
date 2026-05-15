@@ -196,6 +196,10 @@ fn default_caption_retry_max() -> u32 {
     3
 }
 
+fn default_llm_thinking_enabled() -> bool {
+    false
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LlmSettings {
@@ -208,6 +212,9 @@ pub struct LlmSettings {
     /// After the first failed LLM caption request, retry up to this many additional times (0 = no retry).
     #[serde(default = "default_caption_retry_max")]
     pub caption_retry_max: u32,
+    /// When true, chat completions body includes `"thinking": {"type": "enabled"}`; otherwise `"disabled"`.
+    #[serde(default = "default_llm_thinking_enabled")]
+    pub thinking_enabled: bool,
 }
 
 fn default_sd_scripts_path() -> String {
@@ -311,6 +318,7 @@ impl Default for LlmSettings {
             temperature: 1.0,
             max_tokens: 8096,
             caption_retry_max: default_caption_retry_max(),
+            thinking_enabled: default_llm_thinking_enabled(),
         }
     }
 }
@@ -538,6 +546,22 @@ impl LlmSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BaiduTranslateSettings {
+    pub app_id: String,
+    pub secret_key: String,
+}
+
+impl Default for BaiduTranslateSettings {
+    fn default() -> Self {
+        Self {
+            app_id: String::new(),
+            secret_key: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct TrainingSnapshot {
@@ -712,4 +736,13 @@ pub struct TrainingStateChangedEvent {
     pub project_id: String,
     pub job_id: String,
     pub status: JobStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiLogEntry {
+    pub created_at: i64,
+    pub source: String,
+    pub level: String,
+    pub message: String,
 }

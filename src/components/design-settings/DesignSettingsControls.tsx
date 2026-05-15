@@ -41,15 +41,17 @@ export function ToggleRow({
   description,
   checked,
   onToggle,
+  disabled = false,
 }: {
   icon: ReactNode;
   label: string;
   description: string;
   checked: boolean;
   onToggle: () => void;
+  disabled?: boolean;
 }) {
   return (
-    <button type="button" className="design-toggle-row" onClick={onToggle}>
+    <button type="button" className="design-toggle-row" onClick={onToggle} disabled={disabled}>
       <div className="design-toggle-copy">
         <div className="design-toggle-title">
           {icon}

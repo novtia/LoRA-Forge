@@ -111,6 +111,25 @@ export interface LlmSettings {
   maxTokens: number;
   /** Extra attempts after the first failed LLM caption (0 = no retry). Max 20. */
   captionRetryMax: number;
+  /**
+   * Sent as `thinking.type` on chat/completions: `"enabled"` vs `"disabled"`.
+   * Providers that ignore unknown fields are unaffected.
+   */
+  thinkingEnabled: boolean;
+}
+
+/** Baidu FanYi / translate open platform (stored locally in app DB). */
+export interface BaiduTranslateSettings {
+  appId: string;
+  secretKey: string;
+}
+
+/** Backend outbound API diary (LLM, Baidu translate, …). */
+export interface ApiLogEntry {
+  createdAt: number;
+  source: string;
+  level: string;
+  message: string;
 }
 
 export interface TrainingSnapshot {

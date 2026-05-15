@@ -2,6 +2,8 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   ActiveJobSummary,
+  ApiLogEntry,
+  BaiduTranslateSettings,
   DatasetAsset,
   DatasetPreviewAsset,
   DatasetEntry,
@@ -71,6 +73,35 @@ export function saveLlmSettings(settings: LlmSettings): Promise<LlmSettings> {
       settings,
     },
   });
+}
+
+export function loadBaiduTranslateSettings(): Promise<BaiduTranslateSettings> {
+  return invoke("load_baidu_translate_settings");
+}
+
+export function saveBaiduTranslateSettings(
+  settings: BaiduTranslateSettings,
+): Promise<BaiduTranslateSettings> {
+  return invoke("save_baidu_translate_settings", {
+    input: { settings },
+  });
+}
+
+/** Baidu language codes, e.g. `auto`, `en`, `zh`. */
+export function baiduTranslate(
+  text: string,
+  from: string = "auto",
+  to: string = "zh",
+): Promise<string> {
+  return invoke("baidu_translate", { text, from, to });
+}
+
+export function getRecentApiLogs(limit = 200): Promise<ApiLogEntry[]> {
+  return invoke("get_recent_api_logs", { limit });
+}
+
+export function clearApiLogs(): Promise<void> {
+  return invoke("clear_api_logs");
 }
 
 export function listDatasetEntries(projectId: string): Promise<DatasetEntry[]> {

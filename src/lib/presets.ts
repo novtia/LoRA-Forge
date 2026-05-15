@@ -8,9 +8,9 @@ export interface TrainingPreset {
   descriptionZh: string;
   /** Which training script this preset targets. */
   script: string;
-  /** Partial training params applied on top of the current config.
-   *  Path fields (pretrainedModel, vae, animaQwen3, networkWeights, resume)
-   *  are intentionally omitted so the user's paths are always preserved. */
+  /** Merged onto the current session with `{ ...current, ...params }`.
+   *  Built-in catalogue entries omit path fields so your open project keeps its model/VAE/etc.
+   *  User presets store a **full snapshot** including all path fields so they restore exactly what was saved. */
   params: Partial<TrainingConfig>;
 }
 
@@ -416,47 +416,26 @@ export const PRESET_GROUPS: Array<{ label: string; labelZh: string; scriptMatch:
   { label: "Anima (anime)", labelZh: "Anima（动漫）", scriptMatch: "anima_train_network.py" },
 ];
 
-/** PATH fields that are always preserved when a preset is applied. */
-export const PRESERVED_PATH_KEYS: Array<keyof TrainingConfig> = [
-  "pretrainedModel",
-  "vae",
-  "animaQwen3",
-  "networkWeights",
-  "resume",
-];
-
 /**
- * Merge a preset on top of the current config, preserving all path fields
- * from the current project so model/checkpoint selections are never lost.
+ * Merge a preset on top of the current config.
+ * Built-in presets do not specify path keys, so unchanged fields (including paths) carry over from `current`.
+ * Custom presets embed a full snapshot, so applying them also restores saved model/VAE/Qwen/network/resume paths.
  */
 export function applyPreset(
   current: TrainingConfig,
   preset: TrainingPreset,
 ): TrainingConfig {
-  const merged: TrainingConfig = {
+  return {
     ...current,
     ...preset.params,
   };
-  // Always keep the user's existing paths
-  for (const key of PRESERVED_PATH_KEYS) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (merged as any)[key] = current[key];
-  }
-  return merged;
 }
 
 const CUSTOM_PRESET_STORAGE_KEY = "lora-forge.customTrainingPresets";
 
-/** Serialized subset of training params (excludes path fields, same rule as built-in presets). */
+/** Full training snapshot for user presets (every field, including all path strings). */
 export function configToPresetParams(config: TrainingConfig): Partial<TrainingConfig> {
-  const params: Partial<TrainingConfig> = {};
-  for (const key of Object.keys(config) as (keyof TrainingConfig)[]) {
-    if (!PRESERVED_PATH_KEYS.includes(key)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (params as any)[key] = config[key];
-    }
-  }
-  return params;
+  return { ...config };
 }
 
 export function createUserTrainingPreset(name: string, config: TrainingConfig): TrainingPreset {

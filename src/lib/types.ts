@@ -102,6 +102,45 @@ export interface TrainingEnvSettings {
   pythonExecutable: string;
 }
 
+/**
+ * Upstream protocol dialect. `auto` sniffs from `endpointUrl` (openrouter.ai → openRouter,
+ * api.anthropic.com → anthropicCompat, otherwise → openAi).
+ */
+export type LlmEndpointKind = "auto" | "openAi" | "openRouter" | "anthropicCompat";
+
+/**
+ * Reasoning effort dial for thinking-capable models. `default` = let the backend pick a sensible
+ * fallback (typically `high` on thinking models). `none` = explicitly disable thinking when the
+ * provider supports it.
+ */
+export type LlmReasoningEffort =
+  | "default"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "none";
+
+/**
+ * How prior assistant captions are injected when iterating through a dataset:
+ *  - `injectAsConversation` (default): synthesize a legal multi-turn dialogue
+ *    `user(prompt text only) → assistant(prior caption) → user(current image + prompt)`. The
+ *    prior `user` turn does **not** re-attach the previous image — that keeps the token / safety
+ *    budget low and avoids re-triggering content-safety reviews of the prior image (which on
+ *    NSFW LoRA datasets causes thinking models like Gemini to burn all tokens on reasoning and
+ *    return PROHIBITED_CONTENT).
+ *  - `injectAsAssistant`: legacy — push the previous caption as a bare assistant turn before the
+ *    current user message (structurally invalid but tolerated by many providers).
+ *  - `injectAsUserExample`: embed the previous caption inside the current user message under a
+ *    clear "do not copy" reference label.
+ *  - `off`: never reuse the previous caption.
+ */
+export type LlmPriorCaptionMode =
+  | "off"
+  | "injectAsConversation"
+  | "injectAsAssistant"
+  | "injectAsUserExample";
+
 export interface LlmSettings {
   endpointUrl: string;
   apiKey: string;
@@ -116,6 +155,22 @@ export interface LlmSettings {
    * Providers that ignore unknown fields are unaffected.
    */
   thinkingEnabled: boolean;
+  /** Override the auto-sniffed upstream protocol dialect. */
+  endpointKind?: LlmEndpointKind;
+  /**
+   * OpenAI o-series / GPT-5 use `max_completion_tokens` instead of `max_tokens` for the visible
+   * output budget. `0` = omit (fall back to `maxTokens`).
+   */
+  maxCompletionTokens?: number;
+  /**
+   * Thinking-token budget. Maps to Anthropic `thinking.budget_tokens` or OpenRouter
+   * `reasoning.max_tokens`. `0` = no explicit budget.
+   */
+  reasoningBudget?: number;
+  /** Reasoning effort dial; `default` lets the backend choose. */
+  reasoningEffort?: LlmReasoningEffort;
+  /** Prior-caption injection strategy; defaults to `off`. */
+  priorCaptionMode?: LlmPriorCaptionMode;
 }
 
 /** Baidu FanYi / translate open platform (stored locally in app DB). */

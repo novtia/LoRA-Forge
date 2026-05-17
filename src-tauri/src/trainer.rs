@@ -11,7 +11,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use sysinfo::System;
 use tauri::{AppHandle, Emitter};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncReadExt, BufReader};
 
 use crate::{
     db,
@@ -1076,6 +1076,19 @@ pub fn run_mock_trainer_from_env() -> bool {
     true
 }
 
+/// Reads stdout/stderr from the trainer and dispatches each logical "line".
+///
+/// We can't use `read_until(b'\n', …)` here because tqdm (used by sd-scripts) emits
+/// in-place progress updates terminated with `\r` and *no* `\n`. With a strict
+/// newline boundary those updates would sit in the BufReader until the next true
+/// newline (often the end of an epoch), making step/loss appear to update in
+/// bursts. Instead we drain the stream byte-by-byte and split on either `\r`
+/// or `\n`, so every carriage-return-terminated tqdm frame is forwarded to the
+/// progress parser as soon as it arrives.
+///
+/// A small inline buffer accumulates the current in-flight line; any leftover
+/// non-terminated text at EOF is still flushed so the final message is never
+/// lost.
 async fn stream_logs<R>(
     app: AppHandle,
     state: AppState,
@@ -1088,26 +1101,46 @@ where
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut reader = BufReader::new(reader);
-    let mut buf = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    let mut pending: Vec<u8> = Vec::with_capacity(1024);
 
     loop {
-        buf.clear();
-        let n = reader.read_until(b'\n', &mut buf).await?;
+        let n = reader.read(&mut chunk).await?;
         if n == 0 {
             break;
         }
-        let text = String::from_utf8_lossy(&buf);
-        let line = text.trim_end_matches(['\r', '\n']);
-        for segment in line.split('\r') {
-            let normalized = segment.trim();
-            if normalized.is_empty() {
-                continue;
+        for &byte in &chunk[..n] {
+            if byte == b'\n' || byte == b'\r' {
+                flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending).await?;
+            } else {
+                pending.push(byte);
             }
-            handle_stream_line(&app, &state, &project_id, &job_id, stream, normalized).await?;
         }
     }
 
+    flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending).await?;
+
     Ok(())
+}
+
+async fn flush_pending(
+    app: &AppHandle,
+    state: &AppState,
+    project_id: &str,
+    job_id: &str,
+    stream: &str,
+    pending: &mut Vec<u8>,
+) -> AppResult<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(pending).into_owned();
+    pending.clear();
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    handle_stream_line(app, state, project_id, job_id, stream, trimmed).await
 }
 
 async fn handle_stream_line(

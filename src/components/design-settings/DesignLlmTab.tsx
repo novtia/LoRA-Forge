@@ -38,12 +38,64 @@ import {
   type LlmPromptPreset,
 } from "../../lib/llmPromptPresets";
 import type { SupportedLanguage, TranslateFn } from "../../lib/i18n";
-import type { LlmSettings, BaiduTranslateSettings } from "../../lib/types";
+import type {
+  LlmEndpointKind,
+  LlmPriorCaptionMode,
+  LlmReasoningEffort,
+  LlmSettings,
+  BaiduTranslateSettings,
+} from "../../lib/types";
 import { PresetDropdownMenu, type PresetMenuGroup } from "../PresetDropdownMenu";
 import { ToggleRow } from "./DesignSettingsControls";
 
 function createDefaultBaiduTranslateSettings(): BaiduTranslateSettings {
   return { appId: "", secretKey: "" };
+}
+
+const ENDPOINT_KIND_VALUES: readonly LlmEndpointKind[] = [
+  "auto",
+  "openAi",
+  "openRouter",
+  "anthropicCompat",
+];
+
+const REASONING_EFFORT_VALUES: readonly LlmReasoningEffort[] = [
+  "default",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "none",
+];
+
+const PRIOR_CAPTION_VALUES: readonly LlmPriorCaptionMode[] = [
+  "off",
+  "injectAsConversation",
+  "injectAsAssistant",
+  "injectAsUserExample",
+];
+
+function normalizeEndpointKind(value: unknown): LlmEndpointKind {
+  return ENDPOINT_KIND_VALUES.includes(value as LlmEndpointKind)
+    ? (value as LlmEndpointKind)
+    : "auto";
+}
+
+function normalizeReasoningEffort(value: unknown): LlmReasoningEffort {
+  return REASONING_EFFORT_VALUES.includes(value as LlmReasoningEffort)
+    ? (value as LlmReasoningEffort)
+    : "default";
+}
+
+function normalizePriorCaptionMode(value: unknown): LlmPriorCaptionMode {
+  return PRIOR_CAPTION_VALUES.includes(value as LlmPriorCaptionMode)
+    ? (value as LlmPriorCaptionMode)
+    : "injectAsConversation";
+}
+
+function normalizeNonNegativeInt(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.max(0, Math.floor(value));
 }
 
 interface DesignLlmTabProps {
@@ -99,6 +151,41 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     return groups;
   }, [customPresets, t]);
 
+  const endpointKindMenuGroups = useMemo((): PresetMenuGroup[] => [
+    {
+      items: [
+        { id: "auto", label: t("design.llmEndpointKindAuto") },
+        { id: "openAi", label: t("design.llmEndpointKindOpenAi") },
+        { id: "openRouter", label: t("design.llmEndpointKindOpenRouter") },
+        { id: "anthropicCompat", label: t("design.llmEndpointKindAnthropic") },
+      ],
+    },
+  ], [t]);
+
+  const reasoningEffortMenuGroups = useMemo((): PresetMenuGroup[] => [
+    {
+      items: [
+        { id: "default", label: t("design.llmReasoningEffortDefault") },
+        { id: "minimal", label: t("design.llmReasoningEffortMinimal") },
+        { id: "low", label: t("design.llmReasoningEffortLow") },
+        { id: "medium", label: t("design.llmReasoningEffortMedium") },
+        { id: "high", label: t("design.llmReasoningEffortHigh") },
+        { id: "none", label: t("design.llmReasoningEffortNone") },
+      ],
+    },
+  ], [t]);
+
+  const priorCaptionMenuGroups = useMemo((): PresetMenuGroup[] => [
+    {
+      items: [
+        { id: "injectAsConversation", label: t("design.llmPriorCaptionConversation") },
+        { id: "injectAsAssistant", label: t("design.llmPriorCaptionAssistant") },
+        { id: "injectAsUserExample", label: t("design.llmPriorCaptionUserExample") },
+        { id: "off", label: t("design.llmPriorCaptionOff") },
+      ],
+    },
+  ], [t]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -121,6 +208,11 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
               ? Math.min(20, Math.max(0, loaded.captionRetryMax))
               : DEFAULT_LLM_CAPTION_RETRY_MAX,
           thinkingEnabled: typeof loaded.thinkingEnabled === "boolean" ? loaded.thinkingEnabled : false,
+          endpointKind: normalizeEndpointKind(loaded.endpointKind),
+          maxCompletionTokens: normalizeNonNegativeInt(loaded.maxCompletionTokens),
+          reasoningBudget: normalizeNonNegativeInt(loaded.reasoningBudget),
+          reasoningEffort: normalizeReasoningEffort(loaded.reasoningEffort),
+          priorCaptionMode: normalizePriorCaptionMode(loaded.priorCaptionMode),
         });
         setBaiduSettings({
           ...createDefaultBaiduTranslateSettings(),
@@ -182,6 +274,11 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
             ? Math.min(20, Math.max(0, saved.captionRetryMax))
             : DEFAULT_LLM_CAPTION_RETRY_MAX,
         thinkingEnabled: typeof saved.thinkingEnabled === "boolean" ? saved.thinkingEnabled : false,
+        endpointKind: normalizeEndpointKind(saved.endpointKind),
+        maxCompletionTokens: normalizeNonNegativeInt(saved.maxCompletionTokens),
+        reasoningBudget: normalizeNonNegativeInt(saved.reasoningBudget),
+        reasoningEffort: normalizeReasoningEffort(saved.reasoningEffort),
+        priorCaptionMode: normalizePriorCaptionMode(saved.priorCaptionMode),
       }));
       setFeedback(t("design.connectionSaved"));
     } catch (error) {
@@ -625,6 +722,151 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
                     color: "var(--text-muted)",
                   }}
                 >
+                  {t("design.llmEndpointKind")}
+                </div>
+                <PresetDropdownMenu
+                  value={settings.endpointKind ?? "auto"}
+                  onChange={(id) =>
+                    updateSetting("endpointKind", normalizeEndpointKind(id))
+                  }
+                  placeholder={t("design.llmEndpointKindAuto")}
+                  groups={endpointKindMenuGroups}
+                  disabled={loading}
+                  block
+                />
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                  {t("design.llmEndpointKindDesc")}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "bold",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {t("design.llmReasoningEffort")}
+                </div>
+                <PresetDropdownMenu
+                  value={settings.reasoningEffort ?? "default"}
+                  onChange={(id) =>
+                    updateSetting("reasoningEffort", normalizeReasoningEffort(id))
+                  }
+                  placeholder={t("design.llmReasoningEffortDefault")}
+                  groups={reasoningEffortMenuGroups}
+                  disabled={loading}
+                  block
+                />
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                  {t("design.llmReasoningEffortDesc")}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "bold",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {t("design.llmReasoningBudget")}
+                </div>
+                <input
+                  type="number"
+                  className="form-input"
+                  min={0}
+                  value={settings.reasoningBudget ?? 0}
+                  onChange={(event) =>
+                    updateSetting(
+                      "reasoningBudget",
+                      Math.max(0, Number.parseInt(event.target.value || "0", 10) || 0),
+                    )
+                  }
+                  disabled={loading}
+                />
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                  {t("design.llmReasoningBudgetDesc")}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "bold",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {t("design.llmMaxCompletionTokens")}
+                </div>
+                <input
+                  type="number"
+                  className="form-input"
+                  min={0}
+                  value={settings.maxCompletionTokens ?? 0}
+                  onChange={(event) =>
+                    updateSetting(
+                      "maxCompletionTokens",
+                      Math.max(0, Number.parseInt(event.target.value || "0", 10) || 0),
+                    )
+                  }
+                  disabled={loading}
+                />
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                  {t("design.llmMaxCompletionTokensDesc")}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "bold",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  {t("design.llmPriorCaptionMode")}
+                </div>
+                <PresetDropdownMenu
+                  value={settings.priorCaptionMode ?? "injectAsConversation"}
+                  onChange={(id) =>
+                    updateSetting("priorCaptionMode", normalizePriorCaptionMode(id))
+                  }
+                  placeholder={t("design.llmPriorCaptionConversation")}
+                  groups={priorCaptionMenuGroups}
+                  disabled={loading}
+                  block
+                />
+                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                  {t("design.llmPriorCaptionModeDesc")}
+                </div>
+                <PriorCaptionStructurePreview
+                  mode={settings.priorCaptionMode ?? "injectAsConversation"}
+                  t={t}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <div
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: "bold",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    color: "var(--text-muted)",
+                  }}
+                >
                   {t("design.llmCaptionRetryMax")}
                 </div>
                 <input
@@ -656,4 +898,131 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
       </div>
     </div>
   );
+}
+
+interface PriorCaptionStructurePreviewProps {
+  mode: LlmPriorCaptionMode;
+  t: TranslateFn;
+}
+
+interface PreviewLine {
+  /** Conversation role label, e.g. `system` / `user` / `assistant`. */
+  role: string;
+  /** Inline description of the message content (translation key references handled by caller). */
+  content: string;
+  /** Highlight color for the role chip. */
+  tone: "system" | "user" | "assistant";
+}
+
+function PriorCaptionStructurePreview({ mode, t }: PriorCaptionStructurePreviewProps) {
+  const lines = buildPreviewLines(mode, t);
+  return (
+    <div
+      style={{
+        marginTop: "0.25rem",
+        padding: "0.6rem 0.75rem",
+        border: "1px solid var(--border-dim)",
+        borderRadius: "0.4rem",
+        background: "var(--surface-dim, rgba(0,0,0,0.18))",
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.72rem",
+        lineHeight: 1.55,
+        display: "flex",
+        flexDirection: "column",
+        gap: "0.25rem",
+      }}
+    >
+      <div
+        style={{
+          fontSize: "0.65rem",
+          color: "var(--text-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          marginBottom: "0.15rem",
+        }}
+      >
+        {t("design.llmPriorCaptionPreviewHeading")}
+      </div>
+      {lines.map((line, index) => (
+        <div key={index} style={{ display: "flex", gap: "0.6rem", alignItems: "flex-start" }}>
+          <span
+            style={{
+              minWidth: "5.5rem",
+              padding: "0.05rem 0.4rem",
+              borderRadius: "0.25rem",
+              textAlign: "center",
+              fontWeight: 600,
+              fontSize: "0.65rem",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+              background:
+                line.tone === "system"
+                  ? "rgba(140, 140, 140, 0.25)"
+                  : line.tone === "assistant"
+                    ? "rgba(120, 200, 255, 0.22)"
+                    : "rgba(180, 230, 140, 0.22)",
+              color: "var(--text)",
+            }}
+          >
+            {line.role}
+          </span>
+          <span style={{ color: "var(--text)", whiteSpace: "pre-wrap" }}>{line.content}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function buildPreviewLines(mode: LlmPriorCaptionMode, t: TranslateFn): PreviewLine[] {
+  const system: PreviewLine = {
+    role: "system",
+    content: t("design.llmPriorCaptionPreviewSystem"),
+    tone: "system",
+  };
+  const userCurrent: PreviewLine = {
+    role: "user",
+    content: t("design.llmPriorCaptionPreviewUserCurrent"),
+    tone: "user",
+  };
+
+  switch (mode) {
+    case "off":
+      return [system, userCurrent];
+    case "injectAsConversation":
+      return [
+        system,
+        {
+          role: "user",
+          content: t("design.llmPriorCaptionPreviewUserPriorTextOnly"),
+          tone: "user",
+        },
+        {
+          role: "assistant",
+          content: t("design.llmPriorCaptionPreviewAssistantPrior"),
+          tone: "assistant",
+        },
+        userCurrent,
+      ];
+    case "injectAsAssistant":
+      return [
+        system,
+        {
+          role: "assistant",
+          content: t("design.llmPriorCaptionPreviewAssistantBare"),
+          tone: "assistant",
+        },
+        userCurrent,
+      ];
+    case "injectAsUserExample":
+      return [
+        system,
+        {
+          role: "user",
+          content: t("design.llmPriorCaptionPreviewUserEmbedded"),
+          tone: "user",
+        },
+      ];
+    default:
+      return [system, userCurrent];
+  }
 }

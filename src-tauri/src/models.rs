@@ -200,6 +200,104 @@ fn default_llm_thinking_enabled() -> bool {
     false
 }
 
+fn default_endpoint_kind() -> EndpointKind {
+    EndpointKind::Auto
+}
+
+fn default_reasoning_effort() -> ReasoningEffort {
+    ReasoningEffort::Default
+}
+
+fn default_prior_caption_mode() -> PriorCaptionMode {
+    PriorCaptionMode::InjectAsConversation
+}
+
+fn default_u32_zero() -> u32 {
+    0
+}
+
+/// 上游 chat/completions 协议口径（决定如何注入 reasoning/thinking 字段、是否发 max_completion_tokens 等）。
+///
+/// `Auto` 时按 `endpoint_url` 嗅探（openrouter.ai → OpenRouter、api.anthropic.com → AnthropicCompat、其余 → OpenAi）。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum EndpointKind {
+    Auto,
+    OpenAi,
+    OpenRouter,
+    AnthropicCompat,
+}
+
+impl Default for EndpointKind {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
+/// reasoning effort 档位（仅在思维模型上生效）。`Default` 表示"用兜底策略"，`None` 表示"显式关闭思考"。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReasoningEffort {
+    Default,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    None,
+}
+
+impl Default for ReasoningEffort {
+    fn default() -> Self {
+        Self::Default
+    }
+}
+
+impl ReasoningEffort {
+    /// OpenRouter / OpenAI 风格 `reasoning.effort` / `reasoning_effort` 的字符串值。`Default` / `None` 返回 None。
+    pub fn as_effort_str(self) -> Option<&'static str> {
+        match self {
+            Self::Default => None,
+            Self::Minimal => Some("minimal"),
+            Self::Low => Some("low"),
+            Self::Medium => Some("medium"),
+            Self::High => Some("high"),
+            Self::None => Some("none"),
+        }
+    }
+}
+
+/// 上一张图 caption 的注入策略。
+///
+/// 默认 `InjectAsConversation`：构造一个合法的 `user(prompt 文本) → assistant(上一图 caption) →
+/// user(当前图+prompt)` 多轮对话——**上一轮 user 只保留 prompt 文本、不重复发送上一张图**。
+///
+/// 这是经实测最稳的默认：
+/// * 给了模型完整的多轮对话上下文（assistant 不再是凭空冒出来的）
+/// * 不重复发送上一张图，token 压力可控
+/// * 不让上一张露骨图片在 Gemini / Claude 等的安全模型里触发二次审核 —— 上一张图 + 上一张
+///   露骨 caption 同时出现时，部分 thinking 模型会把后续 token 全花在 reasoning 上、`completion=0`
+///   返回 `PROHIBITED_CONTENT`（NSFW LoRA 数据集批量打标时尤其常见）。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PriorCaptionMode {
+    /// 完全不注入（保守模式，避免模型受上一图影响）。
+    Off,
+    /// 默认：模拟多轮对话 `user(prompt 文本) → assistant(上一 caption) → user(当前图+prompt)`，
+    /// 上一轮 user **不重复发送图片**。
+    InjectAsConversation,
+    /// 把上一 caption 作为额外 assistant 消息直接插在当前 user 前（不构造前置 user 轮）。
+    /// 结构上不合法（assistant 凭空冒出），但部分模型容忍。
+    InjectAsAssistant,
+    /// 把上一 caption 嵌入当前 user 消息正文，**显式标注**"reference caption for a DIFFERENT image, do not copy"。
+    InjectAsUserExample,
+}
+
+impl Default for PriorCaptionMode {
+    fn default() -> Self {
+        Self::InjectAsConversation
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LlmSettings {
@@ -212,9 +310,24 @@ pub struct LlmSettings {
     /// After the first failed LLM caption request, retry up to this many additional times (0 = no retry).
     #[serde(default = "default_caption_retry_max")]
     pub caption_retry_max: u32,
-    /// When true, chat completions body includes `"thinking": {"type": "enabled"}`; otherwise `"disabled"`.
+    /// Extended reasoning toggle: OpenRouter uses `reasoning` (`enabled` / `effort: "none"`); other endpoints use `thinking.type` (`enabled` / `disabled`) when applicable.
     #[serde(default = "default_llm_thinking_enabled")]
     pub thinking_enabled: bool,
+    /// 显式选择上游协议类型（Auto 时按 URL 嗅探）。
+    #[serde(default = "default_endpoint_kind")]
+    pub endpoint_kind: EndpointKind,
+    /// OpenAI o-series / GPT-5 等模型使用 `max_completion_tokens` 替代 `max_tokens`。0 表示不发送（沿用 `max_tokens`）。
+    #[serde(default = "default_u32_zero")]
+    pub max_completion_tokens: u32,
+    /// 思维 token 预算（用于 Anthropic `thinking.budget_tokens` / OpenRouter `reasoning.max_tokens`）。0 = 不指定预算。
+    #[serde(default = "default_u32_zero")]
+    pub reasoning_budget: u32,
+    /// reasoning 强度（Default = 用模型清单兜底；None = 显式关闭；其余按字面值发往上游）。
+    #[serde(default = "default_reasoning_effort")]
+    pub reasoning_effort: ReasoningEffort,
+    /// 上一张图 caption 的注入策略，默认 Off（避免上一图 caption 泄漏到当前图）。
+    #[serde(default = "default_prior_caption_mode")]
+    pub prior_caption_mode: PriorCaptionMode,
 }
 
 fn default_sd_scripts_path() -> String {
@@ -319,6 +432,11 @@ impl Default for LlmSettings {
             max_tokens: 8096,
             caption_retry_max: default_caption_retry_max(),
             thinking_enabled: default_llm_thinking_enabled(),
+            endpoint_kind: default_endpoint_kind(),
+            max_completion_tokens: default_u32_zero(),
+            reasoning_budget: default_u32_zero(),
+            reasoning_effort: default_reasoning_effort(),
+            prior_caption_mode: default_prior_caption_mode(),
         }
     }
 }

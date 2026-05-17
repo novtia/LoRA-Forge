@@ -151,16 +151,70 @@ export function deleteDatasetImage(
   return invoke("delete_dataset_image", { projectId, relativePath });
 }
 
+export function groupDatasetImages(
+  projectId: string,
+  relativePaths: string[],
+  groupName: string,
+  parentRelativePath?: string | null,
+): Promise<DatasetEntry[]> {
+  return invoke("group_dataset_images", {
+    input: {
+      projectId,
+      relativePaths,
+      groupName,
+      parentRelativePath: parentRelativePath ?? null,
+    },
+  });
+}
+
+export function moveDatasetImages(
+  projectId: string,
+  relativePaths: string[],
+  targetRelativePath: string,
+): Promise<DatasetEntry[]> {
+  return invoke("move_dataset_images", {
+    input: { projectId, relativePaths, targetRelativePath },
+  });
+}
+
+export function renameDatasetGroup(
+  projectId: string,
+  groupRelativePath: string,
+  newName: string,
+): Promise<DatasetEntry[]> {
+  return invoke("rename_dataset_group", {
+    input: { projectId, groupRelativePath, newName },
+  });
+}
+
+export function removeDatasetGroup(
+  projectId: string,
+  groupRelativePath: string,
+  deleteContents: boolean,
+): Promise<DatasetEntry[]> {
+  return invoke("remove_dataset_group", {
+    input: { projectId, groupRelativePath, deleteContents },
+  });
+}
+
 export function autoTagImage(
   projectId: string,
   relativePath: string,
   userMessage?: string | null,
+  previousAssistantCaption?: string | null,
+  previousImageRelativePath?: string | null,
 ): Promise<string> {
   const trimmed = userMessage?.trim();
+  const prev = previousAssistantCaption?.trim();
+  const prevImg = previousImageRelativePath?.trim();
   return invoke("auto_tag_image", {
     projectId,
     relativePath,
     userMessage: trimmed && trimmed.length > 0 ? trimmed : null,
+    previousAssistantCaption:
+      prev && prev.length > 0 ? prev : null,
+    previousImageRelativePath:
+      prevImg && prevImg.length > 0 ? prevImg : null,
   });
 }
 

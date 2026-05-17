@@ -148,5 +148,10 @@ export function createDefaultLlmSettings(language: SupportedLanguage): LlmSettin
     maxTokens: DEFAULT_LLM_MAX_TOKENS,
     captionRetryMax: DEFAULT_LLM_CAPTION_RETRY_MAX,
     thinkingEnabled: false,
+    endpointKind: "auto",
+    maxCompletionTokens: 0,
+    reasoningBudget: 0,
+    reasoningEffort: "default",
+    priorCaptionMode: "injectAsConversation",
   };
 }

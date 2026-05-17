@@ -15,7 +15,6 @@ import {
   getDatasetAsset,
   getRecentApiLogs,
   groupDatasetImages,
-  listDatasetEntries,
   moveDatasetImages,
   readCaption,
   removeDatasetGroup,
@@ -45,6 +44,7 @@ import {
   removeTriggerWordFromCaptionAllSegments,
 } from "./dataset-editor/datasetEditorHelpers";
 import type { BatchProgress } from "./dataset-editor/datasetEditorTypes";
+import { pullDatasetSidebarEntries, withDatasetSidebarRefresh } from "./dataset-editor/datasetSidebarSync";
 import {
   buildDatasetTree,
   collectAllDirectoryPaths,
@@ -123,7 +123,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   const assetRequestIdRef = useRef(0);
 
   const loadEntries = useCallback(async () => {
-    const datasetEntries = await listDatasetEntries(projectId);
+    const datasetEntries = await pullDatasetSidebarEntries(projectId);
     setEntries(datasetEntries);
     return datasetEntries;
   }, [projectId]);
@@ -406,11 +406,8 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       setPromptBusy(true);
       setError(null);
       try {
-        const nextEntries = await groupDatasetImages(
-          projectId,
-          relativePaths,
-          groupName,
-          parentPath ?? null,
+        const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+          groupDatasetImages(projectId, relativePaths, groupName, parentPath ?? null),
         );
 
         // Diff old vs new directory entries to discover which group folder the
@@ -422,7 +419,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         const oldDirs = new Set(
           entries.filter((e) => e.kind === "directory").map((e) => e.relativePath),
         );
-        const newGroupPaths = nextEntries
+        const newGroupPaths = fresh
           .filter((e) => e.kind === "directory" && !oldDirs.has(e.relativePath))
           .map((e) => e.relativePath);
 
@@ -438,7 +435,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         let movedImagePaths: string[] = [];
         if (matchedGroupPath) {
           const prefix = `${matchedGroupPath}/`;
-          movedImagePaths = nextEntries
+          movedImagePaths = fresh
             .filter((e) => e.kind === "image" && e.relativePath.startsWith(prefix))
             .map((e) => e.relativePath);
         }
@@ -475,7 +472,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
           newActivePath = movedImagePaths[0] ?? null;
         }
 
-        await reloadEntriesPreserveSelection(nextEntries, newActivePath);
+        await reloadEntriesPreserveSelection(fresh, newActivePath);
         // Multi-select the entire freshly created group so the user can immediately
         // run a follow-up batch action (caption, trigger word, etc.) on just that set.
         setSelectedImagePaths(new Set(movedImagePaths));
@@ -495,7 +492,9 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       setPromptBusy(true);
       setError(null);
       try {
-        const nextEntries = await renameDatasetGroup(projectId, groupPath, newName);
+        const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+          renameDatasetGroup(projectId, groupPath, newName),
+        );
         // The current asset path may include the renamed group as a prefix; rewrite
         // to the new prefix when possible so the preview keeps pointing at the same
         // file rather than snapping back to image #0.
@@ -504,13 +503,13 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         let preferred: string | null = currentPath;
         if (currentPath && currentPath.startsWith(oldPrefix)) {
           const basename = currentPath.slice(oldPrefix.length);
-          const candidate = nextEntries.find(
+          const candidate = fresh.find(
             (entry) =>
               entry.kind === "image" && entry.relativePath.endsWith(`/${basename}`),
           );
           preferred = candidate?.relativePath ?? currentPath;
         }
-        await reloadEntriesPreserveSelection(nextEntries, preferred);
+        await reloadEntriesPreserveSelection(fresh, preferred);
         setPromptDialog(null);
       } catch (e) {
         setError(t("dataset.groupActionFailed", { error: getErrorMessage(e, "") }));
@@ -521,28 +520,85 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     [asset?.relativePath, projectId, reloadEntriesPreserveSelection, t],
   );
 
-  const performMoveImagesToRoot = useCallback(
-    async (paths: string[]) => {
-      if (paths.length === 0) return;
+  /**
+   * Moves images (and sibling captions on disk) into `targetRelativePath` — use `""`
+   * for the dataset root. Skips paths already in that folder. Expands the target
+   * folder and updates multi-selection when new paths can be resolved.
+   */
+  const performMoveImagesToTarget = useCallback(
+    async (paths: string[], targetRelativePath: string) => {
+      const normalizedTarget = targetRelativePath.replace(/^\/+|\/+$/g, "");
+      const unique = [...new Set(paths.map((p) => p.trim()).filter(Boolean))];
+      const toMove = unique.filter((p) => parentRelativePath(p) !== normalizedTarget);
+      if (toMove.length === 0) return;
+
       setError(null);
       try {
-        const nextEntries = await moveDatasetImages(projectId, paths, "");
-        await reloadEntriesPreserveSelection(nextEntries, null);
-        setSelectedImagePaths(new Set());
-        setSelectionAnchorPath(null);
+        const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+          moveDatasetImages(projectId, toMove, normalizedTarget),
+        );
+
+        if (normalizedTarget) {
+          setExpandedDirs((prev) => {
+            const next = new Set(prev);
+            next.add(normalizedTarget);
+            let cursor = parentRelativePath(normalizedTarget);
+            while (cursor) {
+              next.add(cursor);
+              cursor = parentRelativePath(cursor);
+            }
+            return next;
+          });
+        }
+
+        const prefix = normalizedTarget ? `${normalizedTarget}/` : "";
+        const newSelection = new Set<string>();
+        for (const oldPath of toMove) {
+          const base = oldPath.split("/").pop() ?? "";
+          const expectedRel = prefix ? `${prefix}${base}` : base;
+          const found = fresh.find((e) => e.kind === "image" && e.relativePath === expectedRel);
+          if (found) {
+            newSelection.add(found.relativePath);
+          }
+        }
+
+        const previousActive = asset?.relativePath ?? null;
+        let newActivePath: string | null = null;
+        if (previousActive && toMove.includes(previousActive)) {
+          const base = previousActive.split("/").pop() ?? "";
+          const expectedRel = prefix ? `${prefix}${base}` : base;
+          newActivePath =
+            fresh.find((e) => e.kind === "image" && e.relativePath === expectedRel)?.relativePath ??
+            null;
+        } else if (previousActive) {
+          newActivePath = previousActive;
+        }
+
+        await reloadEntriesPreserveSelection(fresh, newActivePath);
+        setSelectedImagePaths(newSelection);
+        setSelectionAnchorPath(newSelection.size > 0 ? [...newSelection][0]! : null);
       } catch (e) {
         setError(t("dataset.groupActionFailed", { error: getErrorMessage(e, "") }));
       }
     },
-    [projectId, reloadEntriesPreserveSelection, t],
+    [asset?.relativePath, projectId, reloadEntriesPreserveSelection, t],
+  );
+
+  const performMoveImagesToRoot = useCallback(
+    async (paths: string[]) => {
+      await performMoveImagesToTarget(paths, "");
+    },
+    [performMoveImagesToTarget],
   );
 
   const performRemoveGroup = useCallback(
     async (groupPath: string, deleteContents: boolean) => {
       setError(null);
       try {
-        const nextEntries = await removeDatasetGroup(projectId, groupPath, deleteContents);
-        await reloadEntriesPreserveSelection(nextEntries, null);
+        const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+          removeDatasetGroup(projectId, groupPath, deleteContents),
+        );
+        await reloadEntriesPreserveSelection(fresh, null);
         setSelectedImagePaths(new Set());
         setSelectionAnchorPath(null);
       } catch (e) {
@@ -971,19 +1027,18 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     setBusy("delete");
     setError(null);
     try {
-      const deletedIndex = imageEntries.findIndex((entry) => entry.relativePath === asset.relativePath);
-      const nextEntries = await deleteDatasetImage(projectId, asset.relativePath);
-      setEntries(nextEntries);
-      const nextImageEntries = nextEntries.filter((entry) => entry.kind === "image");
-      if (nextImageEntries.length === 0) {
-        assetRequestIdRef.current += 1;
-        setAsset(null);
-        setSelectedImageIndex(-1);
-        setCaption("");
-        return;
-      }
-
-      setSelectedImageIndex(deletedIndex < 0 ? 0 : Math.min(deletedIndex, nextImageEntries.length - 1));
+      const deletedPath = asset.relativePath;
+      const deletedIndex = imageEntries.findIndex((entry) => entry.relativePath === deletedPath);
+      const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+        deleteDatasetImage(projectId, deletedPath),
+      );
+      const nextImages = fresh.filter((entry) => entry.kind === "image");
+      const preferred: string | null =
+        nextImages.length === 0
+          ? null
+          : (nextImages[Math.min(deletedIndex < 0 ? 0 : deletedIndex, nextImages.length - 1)]?.relativePath ??
+            null);
+      await reloadEntriesPreserveSelection(fresh, preferred);
     } catch (deleteError) {
       setError(getErrorMessage(deleteError, t("errors.deleteImage")));
     } finally {
@@ -1223,6 +1278,9 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         onExpandAll={() => setExpandedDirs(new Set(collectAllDirectoryPaths(datasetTree)))}
         onCollapseAll={() => setExpandedDirs(new Set())}
         onToggleDirectory={toggleDirectoryExpansion}
+        onMoveImagesToFolder={(paths, targetRelativePath) => {
+          void performMoveImagesToTarget(paths, targetRelativePath);
+        }}
         onImageRowClick={handleImageRowClick}
         onImageRowContextMenu={(ev, relativePath) => {
           if (!selectedImagePaths.has(relativePath)) {

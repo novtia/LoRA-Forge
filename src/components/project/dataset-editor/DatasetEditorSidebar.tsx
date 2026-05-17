@@ -1,4 +1,5 @@
-import type { MouseEvent as ReactMouseEvent } from "react";
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
+import { useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,7 +12,35 @@ import {
 import { useI18n } from "../../../lib/i18n";
 import type { DatasetEntry } from "../../../lib/types";
 import type { DatasetTreeNode } from "./datasetTree";
+import { parentRelativePath } from "./datasetTree";
 import type { BatchProgress } from "./datasetEditorTypes";
+
+const DATASET_IMAGE_DRAG_TYPE = "application/x-dataset-editor-image-paths";
+
+function parseDatasetImageDragPaths(dataTransfer: DataTransfer): string[] | null {
+  const raw = dataTransfer.getData(DATASET_IMAGE_DRAG_TYPE) || dataTransfer.getData("text/plain");
+  if (!raw?.trim()) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    if (!v || typeof v !== "object" || !("paths" in v)) return null;
+    const pathsRaw = (v as { paths?: unknown }).paths;
+    if (!Array.isArray(pathsRaw)) return null;
+    const paths = pathsRaw.filter((p): p is string => typeof p === "string" && p.trim().length > 0);
+    return paths.length > 0 ? paths : null;
+  } catch {
+    return null;
+  }
+}
+
+function dragPathsWouldChangeParent(paths: string[], targetRelativePath: string): boolean {
+  const target = targetRelativePath.replace(/^\/+|\/+$/g, "");
+  return paths.some((p) => parentRelativePath(p) !== target);
+}
+
+type FolderDropHighlight =
+  | null
+  | { kind: "root" }
+  | { kind: "directory"; path: string };
 
 type Props = {
   busy: string | null;
@@ -27,6 +56,7 @@ type Props = {
   onExpandAll: () => void;
   onCollapseAll: () => void;
   onToggleDirectory: (path: string) => void;
+  onMoveImagesToFolder: (paths: string[], targetRelativePath: string) => void;
   onImageRowClick: (relativePath: string, ev: ReactMouseEvent) => void;
   onImageRowContextMenu: (ev: ReactMouseEvent, relativePath: string) => void;
   onDirectoryRowContextMenu: (ev: ReactMouseEvent, relativePath: string) => void;
@@ -47,12 +77,37 @@ export function DatasetEditorSidebar({
   onExpandAll,
   onCollapseAll,
   onToggleDirectory,
+  onMoveImagesToFolder,
   onImageRowClick,
   onImageRowContextMenu,
   onDirectoryRowContextMenu,
   onBackgroundContextMenu,
 }: Props) {
   const { t } = useI18n();
+  const [dropHighlight, setDropHighlight] = useState<FolderDropHighlight>(null);
+  const canDragFromSidebar = busy === null;
+  /** WebView2/Chromium needs dropEffect set on dragover; track our drag so gaps & image rows stay "move". */
+  const internalImageDragActiveRef = useRef(false);
+
+  const applySidebarDragDropEffect = (ev: ReactDragEvent) => {
+    const allow =
+      canDragFromSidebar &&
+      internalImageDragActiveRef.current &&
+      imageEntries.length > 0;
+    ev.dataTransfer.dropEffect = allow ? "move" : "none";
+  };
+
+  const clearDropHighlightIfLeaving = (
+    ev: ReactDragEvent,
+    matches: (h: Exclude<FolderDropHighlight, null>) => boolean,
+  ) => {
+    const next = ev.relatedTarget;
+    if (next instanceof Node && ev.currentTarget.contains(next)) return;
+    setDropHighlight((h) => {
+      if (h === null) return h;
+      return matches(h) ? null : h;
+    });
+  };
 
   return (
     <div className="card" style={{ gridColumn: "span 2", gridRow: "span 3", animationDelay: "0s" }}>
@@ -126,6 +181,15 @@ export function DatasetEditorSidebar({
             onBackgroundContextMenu(ev);
           }
         }}
+        onDragOver={(ev) => {
+          ev.preventDefault();
+          applySidebarDragDropEffect(ev);
+        }}
+        onDragLeave={(ev) => {
+          const next = ev.relatedTarget;
+          if (next instanceof Node && ev.currentTarget.contains(next)) return;
+          setDropHighlight(null);
+        }}
         style={{
           flex: 1,
           overflowY: "auto",
@@ -142,6 +206,29 @@ export function DatasetEditorSidebar({
             ev.preventDefault();
             onBackgroundContextMenu(ev);
           }}
+          onDragOver={(ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (imageEntries.length === 0 || !canDragFromSidebar) {
+              ev.dataTransfer.dropEffect = "none";
+              return;
+            }
+            if (!internalImageDragActiveRef.current) {
+              ev.dataTransfer.dropEffect = "none";
+              return;
+            }
+            ev.dataTransfer.dropEffect = "move";
+            setDropHighlight({ kind: "root" });
+          }}
+          onDragLeave={(ev) => clearDropHighlightIfLeaving(ev, (h) => h.kind === "root")}
+          onDrop={(ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            setDropHighlight(null);
+            const paths = parseDatasetImageDragPaths(ev.dataTransfer);
+            if (!paths || !dragPathsWouldChangeParent(paths, "")) return;
+            onMoveImagesToFolder(paths, "");
+          }}
           style={{
             color: "var(--accent-acid)",
             display: "flex",
@@ -149,6 +236,12 @@ export function DatasetEditorSidebar({
             gap: "0.5rem",
             padding: "0.15rem 0.25rem",
             marginBottom: "0.2rem",
+            borderRadius: "4px",
+            outline:
+              dropHighlight?.kind === "root"
+                ? "2px solid var(--accent-acid)"
+                : undefined,
+            outlineOffset: dropHighlight?.kind === "root" ? "1px" : undefined,
           }}
         >
           <FolderOpen size={16} /> dataset/
@@ -160,6 +253,8 @@ export function DatasetEditorSidebar({
           const depthPad = `${0.6 + node.depth * 0.85}rem`;
           if (node.kind === "directory") {
             const isExpanded = expandedDirs.has(node.relativePath);
+            const isDirDrop =
+              dropHighlight?.kind === "directory" && dropHighlight.path === node.relativePath;
             return (
               <div
                 key={`d:${node.relativePath}`}
@@ -167,6 +262,34 @@ export function DatasetEditorSidebar({
                 onContextMenu={(ev) => {
                   ev.preventDefault();
                   onDirectoryRowContextMenu(ev, node.relativePath);
+                }}
+                onDragOver={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  if (!canDragFromSidebar) {
+                    ev.dataTransfer.dropEffect = "none";
+                    return;
+                  }
+                  if (!internalImageDragActiveRef.current) {
+                    ev.dataTransfer.dropEffect = "none";
+                    return;
+                  }
+                  ev.dataTransfer.dropEffect = "move";
+                  setDropHighlight({ kind: "directory", path: node.relativePath });
+                }}
+                onDragLeave={(ev) =>
+                  clearDropHighlightIfLeaving(
+                    ev,
+                    (h) => h.kind === "directory" && h.path === node.relativePath,
+                  )
+                }
+                onDrop={(ev) => {
+                  ev.preventDefault();
+                  ev.stopPropagation();
+                  setDropHighlight(null);
+                  const paths = parseDatasetImageDragPaths(ev.dataTransfer);
+                  if (!paths || !dragPathsWouldChangeParent(paths, node.relativePath)) return;
+                  onMoveImagesToFolder(paths, node.relativePath);
                 }}
                 style={{
                   display: "flex",
@@ -180,8 +303,11 @@ export function DatasetEditorSidebar({
                   borderRadius: "4px",
                   cursor: "pointer",
                   color: "var(--text-main)",
+                  outline: isDirDrop ? "2px solid var(--accent-acid)" : undefined,
+                  outlineOffset: isDirDrop ? "1px" : undefined,
                 }}
                 onMouseEnter={(e) => {
+                  if (isDirDrop) return;
                   e.currentTarget.style.background =
                     "color-mix(in srgb, var(--accent-acid) 10%, transparent)";
                 }}
@@ -223,8 +349,29 @@ export function DatasetEditorSidebar({
           return (
             <div
               key={`i:${entry.relativePath}`}
+              draggable={canDragFromSidebar}
+              onDragStart={(ev) => {
+                if (!canDragFromSidebar) return;
+                internalImageDragActiveRef.current = true;
+                const pathsToMove = selectedImagePaths.has(entry.relativePath)
+                  ? [...selectedImagePaths]
+                  : [entry.relativePath];
+                const payload = JSON.stringify({ paths: pathsToMove });
+                ev.dataTransfer.setData(DATASET_IMAGE_DRAG_TYPE, payload);
+                ev.dataTransfer.setData("text/plain", payload);
+                // WebView2 is less picky when both copy and move are allowed.
+                ev.dataTransfer.effectAllowed = "copyMove";
+              }}
+              onDragEnd={() => {
+                internalImageDragActiveRef.current = false;
+                setDropHighlight(null);
+              }}
               onClick={(ev) => onImageRowClick(entry.relativePath, ev)}
               onContextMenu={(ev) => onImageRowContextMenu(ev, entry.relativePath)}
+              onDragOver={(ev) => {
+                ev.preventDefault();
+                applySidebarDragDropEffect(ev);
+              }}
               style={{
                 display: "flex",
                 alignItems: "center",

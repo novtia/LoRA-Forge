@@ -141,7 +141,7 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.treeExpandAll": "Expand all",
     "dataset.treeCollapseAll": "Collapse all",
     "dataset.treeHintMultiSelect":
-      "Ctrl+click to toggle, Shift+click for a range, Ctrl+G to group selection.",
+      "Ctrl+click to toggle, Shift+click for a range, Ctrl+G to group. Drag images onto dataset/ or a folder to move (caption .txt moves with each image); drag with a multi-selection to move all selected.",
     "dataset.groupActionFailed": "Group action failed: {{error}}",
     "dataset.dialogConfirm": "Confirm",
     "dataset.dialogCancel": "Cancel",
@@ -684,7 +684,7 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.treeExpandAll": "全部展开",
     "dataset.treeCollapseAll": "全部折叠",
     "dataset.treeHintMultiSelect":
-      "Ctrl 单击切换、Shift 单击范围选择、Ctrl+G 对选中项进行分组。",
+      "Ctrl 单击切换、Shift 单击范围选择、Ctrl+G 分组。可将图片拖到 dataset/ 或文件夹上移动（每张图旁的 .txt 会一起移动）；多选后拖动可一次移动全部选中项。",
     "dataset.groupActionFailed": "分组操作失败：{{error}}",
     "dataset.dialogConfirm": "确认",
     "dataset.dialogCancel": "取消",

@@ -226,6 +226,14 @@ export function startTraining(projectId: string): Promise<ActiveJobSummary> {
   return invoke("start_training", { projectId });
 }
 
+export function startTrainingFromLatestWeights(projectId: string): Promise<ActiveJobSummary> {
+  return invoke("start_training_from_latest_weights", { projectId });
+}
+
+export function getLatestOutputCheckpoint(projectId: string): Promise<string | null> {
+  return invoke("get_latest_output_checkpoint", { projectId });
+}
+
 export function pauseTraining(projectId: string): Promise<ActiveJobSummary> {
   return invoke("pause_training", { projectId });
 }

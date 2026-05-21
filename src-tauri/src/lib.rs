@@ -51,6 +51,8 @@ pub fn run() {
             commands::dataset::rename_dataset_group,
             commands::dataset::remove_dataset_group,
             commands::training::start_training,
+            commands::training::start_training_from_latest_weights,
+            commands::training::get_latest_output_checkpoint,
             commands::training::pause_training,
             commands::training::resume_training,
             commands::training::abort_training,

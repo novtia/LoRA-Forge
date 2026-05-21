@@ -10,16 +10,20 @@ import {
   X,
 } from "lucide-react";
 import { cancelLlmCaption } from "../../../lib/desktopApi";
+import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
 import type { ApiLogEntry, DatasetAsset, DatasetEntry } from "../../../lib/types";
 import { useI18n } from "../../../lib/i18n";
 import FileAssetImage from "../../FileAssetImage";
 import { formatApiLogTime } from "./datasetEditorHelpers";
 import type { BatchProgress } from "./datasetEditorTypes";
+import { ImageScopePicker } from "./ImageScopePicker";
+import type { TriggerScopeFolderOption } from "./TriggerPositionPicker";
 import { API_LOG_DRAWER_W, BATCH_FLYOUT_W, PREVIEW_DOCK_PX } from "./layoutConstants";
 
 type Props = {
   asset: DatasetAsset | null;
   imageEntriesLength: number;
+  batchTaggingTargetCount: number;
   selectedImageIndex: number;
   previewDockOpen: boolean;
   batchFlyoutOpen: boolean;
@@ -27,6 +31,11 @@ type Props = {
   setPreviewDockOpen: (open: boolean) => void;
   setBatchFlyoutOpen: Dispatch<SetStateAction<boolean>>;
   setApiLogDrawerOpen: Dispatch<SetStateAction<boolean>>;
+  batchTaggingScope: DatasetEditorTriggerScope;
+  setBatchTaggingScope: (scope: DatasetEditorTriggerScope) => void;
+  batchTaggingGroupPath: string;
+  setBatchTaggingGroupPath: (path: string) => void;
+  batchTaggingFolderOptions: TriggerScopeFolderOption[];
   taggingMode: "all" | "range";
   setTaggingMode: (mode: "all" | "range") => void;
   imageRange: string;
@@ -45,6 +54,7 @@ type Props = {
 export function DatasetEditorPreviewCard({
   asset,
   imageEntriesLength,
+  batchTaggingTargetCount,
   selectedImageIndex,
   previewDockOpen,
   batchFlyoutOpen,
@@ -52,6 +62,11 @@ export function DatasetEditorPreviewCard({
   setPreviewDockOpen,
   setBatchFlyoutOpen,
   setApiLogDrawerOpen,
+  batchTaggingScope,
+  setBatchTaggingScope,
+  batchTaggingGroupPath,
+  setBatchTaggingGroupPath,
+  batchTaggingFolderOptions,
   taggingMode,
   setTaggingMode,
   imageRange,
@@ -213,8 +228,29 @@ export function DatasetEditorPreviewCard({
                   overflowY: "auto",
                 }}
               >
+                <ImageScopePicker
+                  disabled={busy !== null}
+                  t={t}
+                  config={{
+                    mode: batchTaggingScope,
+                    onChangeMode: setBatchTaggingScope,
+                    groupPath: batchTaggingGroupPath,
+                    onChangeGroupPath: setBatchTaggingGroupPath,
+                    folderOptions: batchTaggingFolderOptions,
+                    targetCount: batchTaggingTargetCount,
+                    imageEntriesLength,
+                    labelKey: "dataset.batchTaggingScope.label",
+                    folderMenuAriaKey: "dataset.batchTaggingScope.folderMenuAria",
+                    selectionHintKey: "dataset.batchTaggingScope.selectionHint",
+                    targetCountKey: "dataset.batchTaggingScope.targetCount",
+                  }}
+                />
+
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                   <label className="form-label">{t("dataset.taggingMode")}</label>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+                    {t("dataset.taggingModeHint")}
+                  </div>
                   <div
                     style={{
                       display: "grid",
@@ -288,7 +324,7 @@ export function DatasetEditorPreviewCard({
                     marginTop: taggingMode === "range" ? 0 : "-0.5rem",
                   }}
                 >
-                  {t("dataset.totalImages", { total: imageEntriesLength })}
+                  {t("dataset.totalImagesInScope", { total: batchTaggingTargetCount })}
                 </div>
 
                 {batchProgress ? (
@@ -340,7 +376,7 @@ export function DatasetEditorPreviewCard({
                     type="button"
                     className="btn btn-primary"
                     style={{ flex: 1, justifyContent: "center", padding: "0.75rem" }}
-                    disabled={imageEntriesLength === 0 || busy !== null}
+                    disabled={batchTaggingTargetCount === 0 || busy !== null}
                     onClick={() => void runBatchTagging()}
                   >
                     <Bot size={18} style={{ marginRight: "0.5rem" }} />{" "}

@@ -20,6 +20,7 @@ import {
   Trash2,
   Save,
   X,
+  Layers,
 } from "lucide-react";
 import ConfigEditor from "../components/project/ConfigEditor";
 import DatasetEditor from "../components/project/DatasetEditor";
@@ -30,6 +31,7 @@ import {
   exportCheckpoint,
   getActiveJob,
   getDatasetPreviewAssets,
+  getLatestOutputCheckpoint,
   getProject,
   listDatasetEntries,
   loadTrainingConfig,
@@ -38,6 +40,8 @@ import {
   onTrainingState,
   saveTrainingConfig,
   startTraining,
+  startTrainingFromLatestWeights,
+  resumeTraining,
 } from "../lib/desktopApi";
 import FileAssetImage from "../components/FileAssetImage";
 import { formatTimer } from "../lib/formatters";
@@ -99,12 +103,26 @@ function snapshotFromJob(job: ActiveJobSummary | null): TrainingSnapshot {
   };
 }
 
-function chartBarsFromHistory(history: ActiveJobSummary["history"]): number[] {
+interface LossChartBar {
+  height: number;
+  step: number | null;
+  loss: number | null;
+}
+
+function lossChartBarsFromHistory(history: ActiveJobSummary["history"]): LossChartBar[] {
   if (history.length === 0) {
-    return Array.from({ length: 24 }, (_, index) => Math.max(8, 72 - index * 2));
+    return Array.from({ length: 24 }, (_, index) => ({
+      height: Math.max(8, 72 - index * 2),
+      step: null,
+      loss: null,
+    }));
   }
 
-  return history.map((point) => Math.min(100, Math.max(5, (point.loss / 0.2) * 100)));
+  return history.map((point) => ({
+    height: Math.min(100, Math.max(5, (point.loss / 0.2) * 100)),
+    step: point.step,
+    loss: point.loss,
+  }));
 }
 
 function trainingScriptSummaryLabel(script: string, t: TranslateFn): string {
@@ -125,6 +143,13 @@ function configSummary(config: TrainingConfig, t: TranslateFn) {
     { key: t("config.resolution"), val: config.resolution },
     { key: t("config.datasetRepeats"), val: String(config.datasetRepeats) },
     { key: t("config.batchSize"), val: String(config.batchSize) },
+    {
+      key: t("config.trainingLengthMode"),
+      val:
+        (config.trainingLengthMode ?? "steps") === "epochs"
+          ? `${t("config.trainingLengthByEpochs")} · ${config.epochs}`
+          : `${t("config.trainingLengthBySteps")} · ${config.maxTrainSteps}`,
+    },
     { key: t("config.baseLr"), val: config.baseLr },
     { key: t("config.networkDimRank"), val: String(config.networkDim) },
     { key: t("config.networkAlpha"), val: String(config.networkAlpha) },
@@ -231,6 +256,8 @@ export default function ProjectDetailPage() {
   const manualLogSeqRef = useRef(-1);
   const datasetPreviewGridRef = useRef<HTMLDivElement>(null);
   const [datasetPreviewGridDims, setDatasetPreviewGridDims] = useState({ cols: 6, rows: 2 });
+  /** Newest `.safetensors` in project output dir (mtime); drives “continue from latest”. */
+  const [latestCheckpointPath, setLatestCheckpointPath] = useState<string | null>(null);
   const projectId = id ?? "";
   const projectName = project?.name ?? projectId.replace(/-/g, "_");
 
@@ -287,11 +314,12 @@ export default function ProjectDetailPage() {
 
   const loadProjectData = useCallback(async () => {
     if (!projectId) return;
-    const [projectData, configData, jobData, datasetData] = await Promise.all([
+    const [projectData, configData, jobData, datasetData, latestCkpt] = await Promise.all([
       getProject(projectId),
       loadTrainingConfig(projectId),
       getActiveJob(projectId),
       listDatasetEntries(projectId),
+      getLatestOutputCheckpoint(projectId).catch(() => null),
     ]);
 
     setProject(projectData);
@@ -299,6 +327,7 @@ export default function ProjectDetailPage() {
     setDraftConfig(configData);
     setJob(normalizeActiveJobLogs(jobData));
     setDatasetEntries(datasetData);
+    setLatestCheckpointPath(typeof latestCkpt === "string" && latestCkpt.length > 0 ? latestCkpt : null);
     setRuntimeSeconds(jobData?.runtimeSeconds ?? 0);
   }, [projectId]);
 
@@ -403,7 +432,12 @@ export default function ProjectDetailPage() {
   }, [job?.status]);
 
   const snapshot = snapshotFromJob(job);
-  const chartBars = chartBarsFromHistory(job?.history ?? []);
+  const lengthMode = draftConfig?.trainingLengthMode ?? "steps";
+  const stepTotalForUi =
+    snapshot.stepTotal ||
+    (draftConfig ? (lengthMode === "steps" ? draftConfig.maxTrainSteps : 0) : 0) ||
+    0;
+  const lossChartBars = lossChartBarsFromHistory(job?.history ?? []);
   const consoleLogs = useMemo(
     () =>
       dedupeTrainingLogs(
@@ -510,6 +544,13 @@ export default function ProjectDetailPage() {
     try {
       let nextJob: ActiveJobSummary;
       if (shouldStartTraining) {
+        // Backend always reads the last saved config from SQLite — unsaved edits (e.g. cleared
+        // 「网络初始权重」) would otherwise be ignored and an old `network_weights` path kept.
+        if (draftConfig) {
+          const saved = await saveTrainingConfig(projectId, draftConfig);
+          setConfig(saved);
+          setDraftConfig(saved);
+        }
         nextJob = await startTraining(projectId);
       } else {
         nextJob = await abortTraining(projectId);
@@ -536,6 +577,73 @@ export default function ProjectDetailPage() {
           stage: shouldStartTraining ? "bootstrap" : "shutdown",
         },
       );
+      setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleContinueFromLatest = async () => {
+    if (!projectId || !latestCheckpointPath || !canStartTraining) return;
+    setBusyAction("continue-latest");
+    setError(null);
+    appendConsoleNotice(
+      t("projectDetail.consoleContinueFromWeightsRequested", { path: latestCheckpointPath }),
+      {
+        level: "info",
+        stage: "bootstrap",
+      },
+    );
+    try {
+      if (draftConfig) {
+        const saved = await saveTrainingConfig(projectId, draftConfig);
+        setConfig(saved);
+        setDraftConfig(saved);
+      }
+      const nextJob = await startTrainingFromLatestWeights(projectId);
+      setJob(normalizeActiveJobLogs(nextJob));
+      setRuntimeSeconds(nextJob.runtimeSeconds);
+      appendConsoleNotice(
+        t("projectDetail.consoleContinueFromWeightsConfirmed", { path: latestCheckpointPath }),
+        {
+          level: "success",
+          stage: "train_loop",
+        },
+      );
+      await loadProjectData();
+    } catch (actionError) {
+      appendConsoleNotice(t("projectDetail.consoleContinueFromWeightsFailed"), {
+        level: "warn",
+        stage: "bootstrap",
+      });
+      setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleResumeProcess = async () => {
+    if (!projectId || job?.status !== "paused") return;
+    setBusyAction("resume-process");
+    setError(null);
+    appendConsoleNotice(t("projectDetail.consoleResumeRequested"), {
+      level: "info",
+      stage: "bootstrap",
+    });
+    try {
+      const nextJob = await resumeTraining(projectId);
+      setJob(normalizeActiveJobLogs(nextJob));
+      setRuntimeSeconds(nextJob.runtimeSeconds);
+      appendConsoleNotice(t("projectDetail.consoleResumeConfirmed"), {
+        level: "success",
+        stage: "train_loop",
+      });
+      await loadProjectData();
+    } catch (actionError) {
+      appendConsoleNotice(t("projectDetail.consoleResumeFailed"), {
+        level: "warn",
+        stage: "bootstrap",
+      });
       setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
     } finally {
       setBusyAction(null);
@@ -624,6 +732,30 @@ export default function ProjectDetailPage() {
               >
                 <MainActionIcon size={16} /> {busyAction === "primary" ? t("common.working") : mainActionLabel}
               </button>
+              <button
+                type="button"
+                className="btn"
+                title={t("projectDetail.continueFromLatestTitle")}
+                aria-label={t("projectDetail.continueFromLatest")}
+                disabled={busyAction !== null || !canStartTraining || !latestCheckpointPath}
+                onClick={() => void handleContinueFromLatest()}
+              >
+                <Layers size={16} aria-hidden />{" "}
+                {busyAction === "continue-latest" ? t("common.working") : t("projectDetail.continueFromLatest")}
+              </button>
+              {job?.status === "paused" ? (
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  title={t("projectDetail.resumeProcessTitle")}
+                  aria-label={t("projectDetail.resume")}
+                  disabled={busyAction !== null}
+                  onClick={() => void handleResumeProcess()}
+                >
+                  <Play size={16} aria-hidden />{" "}
+                  {busyAction === "resume-process" ? t("common.working") : t("projectDetail.resume")}
+                </button>
+              ) : null}
               <button className="btn btn-primary" onClick={() => void handleExport()} disabled={busyAction !== null}>
                 <Download size={16} /> {busyAction === "export" ? t("common.exporting") : t("common.export")}
               </button>
@@ -697,7 +829,7 @@ export default function ProjectDetailPage() {
                 <span className="prog-val highlight">
                   {snapshot.step.toLocaleString()}
                   <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>
-                    {" "}/ {(snapshot.stepTotal || draftConfig?.stepsPerEpoch || 0).toLocaleString()}
+                    {" "}/ {stepTotalForUi.toLocaleString()}
                   </span>
                 </span>
               </div>
@@ -714,7 +846,7 @@ export default function ProjectDetailPage() {
               <div
                 className="main-progress-fill"
                 style={{
-                  width: `${snapshot.stepTotal > 0 ? (snapshot.step / snapshot.stepTotal) * 100 : 0}%`,
+                  width: `${stepTotalForUi > 0 ? (snapshot.step / stepTotalForUi) * 100 : 0}%`,
                 }}
               />
             </div>
@@ -729,22 +861,36 @@ export default function ProjectDetailPage() {
             </div>
             <div className="chart-container">
               <div className="chart-grid-lines">
-                {["0.20", "0.15", "0.10", "0.05", "0.00"].map((label, index) => (
-                  <div key={label} className="chart-line" style={{ top: `${index * 25}%` }}>
-                    <span className="chart-y-label">{label}</span>
-                  </div>
-                ))}
+                {[0.2, 0.15, 0.1, 0.05, 0].map((value, index) => {
+                  const label = value.toFixed(4);
+                  return (
+                    <div key={label} className="chart-line" style={{ top: `${index * 25}%` }}>
+                      <span className="chart-y-label">{label}</span>
+                    </div>
+                  );
+                })}
               </div>
-              {chartBars.map((height, index) => (
-                <div
-                  key={`${height}-${index}`}
-                  className="chart-bar"
-                  style={{
-                    height: `${height}%`,
-                    background: index > chartBars.length - 10 ? "var(--accent-orange)" : undefined,
-                  }}
-                />
-              ))}
+              {lossChartBars.map((bar, index) => {
+                const title =
+                  bar.loss != null && bar.step != null
+                    ? t("projectDetail.lossChartBarTooltip", {
+                        loss: bar.loss.toFixed(4),
+                        step: bar.step.toLocaleString(),
+                      })
+                    : undefined;
+                return (
+                  <div
+                    key={`${bar.step ?? "p"}-${index}-${bar.height}`}
+                    className="chart-bar"
+                    title={title}
+                    style={{
+                      height: `${bar.height}%`,
+                      background:
+                        index > lossChartBars.length - 10 ? "var(--accent-orange)" : undefined,
+                    }}
+                  />
+                );
+              })}
             </div>
           </div>
 

@@ -23,6 +23,7 @@ import {
   PRESET_GROUPS,
   applyPreset,
   createUserTrainingPreset,
+  isStyleArtistPresetId,
   loadCustomPresetsFromStorage,
   saveCustomPresetsToStorage,
   type TrainingPreset,
@@ -306,6 +307,19 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
             {language === "zh-CN" ? selectedPreset.descriptionZh : selectedPreset.description}
           </div>
         ) : null}
+        {selectedPresetId && isStyleArtistPresetId(selectedPresetId) ? (
+          <div
+            style={{
+              fontSize: "0.68rem",
+              color: "var(--accent-orange)",
+              marginBottom: "0.4rem",
+              padding: "0 0.1rem",
+              lineHeight: 1.4,
+            }}
+          >
+            {t("config.styleCaptionHint")}
+          </div>
+        ) : null}
         {presetError ? (
           <div
             style={{
@@ -418,16 +432,35 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
                 value={config.batchSize}
                 onChange={(value) => updateConfig("batchSize", value)}
               />
-              <NumberField
-                label={t("config.epochs")}
-                value={config.epochs}
-                onChange={(value) => updateConfig("epochs", value)}
+              <SelectField
+                label={t("config.trainingLengthMode")}
+                value={config.trainingLengthMode ?? "steps"}
+                onChange={(value) => {
+                  const mode = value as "steps" | "epochs";
+                  onChange({
+                    ...config,
+                    trainingLengthMode: mode,
+                  });
+                }}
+                options={[
+                  { label: t("config.trainingLengthBySteps"), value: "steps" },
+                  { label: t("config.trainingLengthByEpochs"), value: "epochs" },
+                ]}
               />
-              <NumberField
-                label={t("config.stepsPerEpoch")}
-                value={config.stepsPerEpoch}
-                onChange={(value) => updateConfig("stepsPerEpoch", value)}
-              />
+              {(config.trainingLengthMode ?? "steps") === "steps" ? (
+                <NumberField
+                  label={t("config.maxTrainSteps")}
+                  value={config.maxTrainSteps}
+                  onChange={(value) => updateConfig("maxTrainSteps", value)}
+                  hint={t("config.maxTrainStepsHint")}
+                />
+              ) : (
+                <NumberField
+                  label={t("config.epochs")}
+                  value={config.epochs}
+                  onChange={(value) => updateConfig("epochs", value)}
+                />
+              )}
               <NumberField
                 label={t("config.saveEveryNEpochs")}
                 value={config.saveEveryNEpochs}
@@ -1063,10 +1096,13 @@ function NumberField({
   label,
   value,
   onChange,
+  hint,
 }: {
   label: string;
   value: number;
   onChange: (value: number) => void;
+  /** Short footnote under the input (e.g. fields not passed as CLI args). */
+  hint?: string;
 }) {
   return (
     <div className="form-group">
@@ -1077,6 +1113,18 @@ function NumberField({
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
       />
+      {hint ? (
+        <div
+          style={{
+            fontSize: "0.62rem",
+            color: "var(--text-muted)",
+            marginTop: "0.3rem",
+            lineHeight: 1.4,
+          }}
+        >
+          {hint}
+        </div>
+      ) : null}
     </div>
   );
 }

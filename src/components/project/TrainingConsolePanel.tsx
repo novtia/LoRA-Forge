@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, type CSSProperties } from "react";
 import { TerminalSquare } from "lucide-react";
 import type { TrainingLogLine } from "../../lib/types";
 
@@ -57,6 +57,14 @@ export interface TrainingConsolePanelProps {
   maxLines?: number;
 }
 
+/** Pixels from the bottom to still count as “following” the tail (tqdm refreshes etc.). */
+const STICK_BOTTOM_THRESHOLD_PX = 80;
+
+function isNearBottom(el: HTMLElement, thresholdPx: number): boolean {
+  const { scrollTop, scrollHeight, clientHeight } = el;
+  return scrollHeight - scrollTop - clientHeight <= thresholdPx;
+}
+
 export default function TrainingConsolePanel({
   logs,
   title,
@@ -67,10 +75,26 @@ export default function TrainingConsolePanel({
   maxLines,
 }: TrainingConsolePanelProps) {
   const logRef = useRef<HTMLDivElement>(null);
+  /** User is following live output; false after they scroll up, true again when they reach the bottom. */
+  const stickToBottomRef = useRef(true);
   const visibleLogs = useMemo(() => (maxLines ? logs.slice(-maxLines) : logs), [logs, maxLines]);
 
+  const onScrollLogPane = useCallback(() => {
+    const el = logRef.current;
+    if (!el) return;
+    stickToBottomRef.current = isNearBottom(el, STICK_BOTTOM_THRESHOLD_PX);
+  }, []);
+
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
+    const el = logRef.current;
+    if (!el || !stickToBottomRef.current) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      const node = logRef.current;
+      if (!node || !stickToBottomRef.current) return;
+      node.scrollTop = node.scrollHeight;
+    });
   }, [visibleLogs]);
 
   return (
@@ -84,7 +108,11 @@ export default function TrainingConsolePanel({
         </span>
       </div>
       <div className="terminal-content-wrapper">
-        <div className="terminal-content" ref={logRef}>
+        <div
+          className="terminal-content"
+          ref={logRef}
+          onScroll={onScrollLogPane}
+        >
           {visibleLogs.length > 0 ? (
             visibleLogs.map((log, index) => (
               <TrainingConsoleLine

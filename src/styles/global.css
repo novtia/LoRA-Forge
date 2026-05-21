@@ -1406,6 +1406,11 @@ html[lang="zh-CN"] .page-dashboard-home .proj-footer {
   color: var(--text-main);
 }
 
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
 .btn:hover {
   background: var(--text-main);
   color: var(--text-dark);
@@ -2651,6 +2656,205 @@ textarea.form-input:focus {
 
 .lf-icon-spin {
   animation: lf-icon-spin 0.75s linear infinite;
+}
+
+/* Dataset editor: 触发词插入位置 + 作用范围（与 captions 卡片对齐） */
+.lf-trigger-pos-picker {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.lf-trigger-pos-picker-toggle {
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.lf-trigger-pos-picker-kicker {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.lf-trigger-pos-picker-summary-slot {
+  color: var(--text-main);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-trigger-pos-picker-summary-scope {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.lf-trigger-scope-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.lf-trigger-field-label {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+}
+
+.lf-trigger-scope-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: stretch;
+}
+
+.lf-trigger-menu-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  width: 100%;
+  max-width: 100%;
+  min-height: 2.15rem;
+  padding: 0.38rem 0.55rem;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  color: var(--text-main);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid var(--border-dim);
+  border-radius: 0;
+  cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.lf-trigger-menu-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.lf-trigger-menu-trigger:not(:disabled):hover {
+  border-color: var(--border-glow);
+}
+
+.lf-trigger-menu-trigger[aria-expanded="true"]:not(:disabled) {
+  border-color: var(--accent-acid);
+  box-shadow: inset 0 0 0 1px rgba(212, 255, 0, 0.12);
+}
+
+.lf-trigger-menu-trigger svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  opacity: 0.9;
+  transition: transform 120ms ease;
+}
+
+.lf-trigger-menu-panel {
+  border-radius: 0;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-surface);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+.lf-trigger-menu-panel-inner {
+  padding: 0.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.lf-trigger-menu-option {
+  display: flex;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: left;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  border: none;
+  border-radius: 0;
+  font-family: var(--font-display);
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: var(--text-main);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.lf-trigger-menu-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.lf-trigger-menu-option:hover:not(:disabled):not([aria-selected="true"]) {
+  background: var(--bg-surface-alt);
+}
+
+.lf-trigger-menu-option[aria-selected="true"] {
+  background: rgba(212, 255, 0, 0.06);
+  box-shadow: inset 3px 0 0 var(--accent-acid);
+  color: var(--text-main);
+}
+
+.lf-trigger-hint {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.lf-trigger-sep {
+  border: none;
+  border-top: 1px solid var(--border-dim);
+  margin: 0.35rem 0 0.25rem;
+  height: 0;
+  opacity: 0.85;
+}
+
+.lf-trigger-slot-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.lf-trigger-slot-toolbar .btn {
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  padding: 0.28rem 0.55rem;
+}
+
+.lf-trigger-slot-toolbar .btn:not([aria-pressed="true"]) {
+  color: var(--text-muted);
+}
+
+/* 序号输入：避免整条都用荧光字色，与标签链层次一致 */
+.lf-trigger-pos-picker input.lf-trigger-slot-input.form-input {
+  width: 3.5rem;
+  padding: 0.28rem 0.4rem;
+  font-size: 0.72rem;
+  text-align: center;
+  color: var(--text-muted);
+  box-shadow: none;
+}
+
+.lf-trigger-pos-picker input.lf-trigger-slot-input.form-input:focus {
+  color: var(--text-main);
+  border-color: var(--border-glow);
+  background: rgba(0, 0, 0, 0.35);
+  box-shadow: none;
+}
+
+.lf-trigger-tag-chain {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 /* Dataset editor: 原文 / 译文分区 */

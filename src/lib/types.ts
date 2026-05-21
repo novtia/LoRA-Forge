@@ -43,6 +43,10 @@ export interface TrainingConfig {
   convAlpha: number;
   networkDropout: string;
   batchSize: number;
+  /** Mutually exclusive with epoch-based length: `steps` → `--max_train_steps`, `epochs` → `--max_train_epochs`. */
+  trainingLengthMode: "steps" | "epochs";
+  /** Optimizer steps cap when `trainingLengthMode === "steps"`. */
+  maxTrainSteps: number;
   epochs: number;
   saveEveryNEpochs: number;
   mixedPrecision: string;
@@ -76,7 +80,6 @@ export interface TrainingConfig {
   xformers: boolean;
   shuffleCaptions: boolean;
   colorJitter: boolean;
-  stepsPerEpoch: number;
   saveEveryNSteps: number;
   saveLastNEpochs: number;
   saveLastNSteps: number;

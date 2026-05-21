@@ -1,11 +1,24 @@
 use std::{
     cmp::Ordering,
+    ffi::OsStr,
     fs,
     path::{Path, PathBuf},
+    process::Command,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::error::{AppError, AppResult};
+
+/// Spawn a console subprocess from the Tauri GUI without a flashing `cmd` window on Windows.
+pub fn hidden_std_command(program: impl AsRef<OsStr>) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
 
 pub fn now_ts() -> i64 {
     SystemTime::now()

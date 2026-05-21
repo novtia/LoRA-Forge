@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { useMemo } from "react";
 import {
   ArrowRightLeft,
   Bot,
@@ -13,6 +14,7 @@ import {
   Trash,
 } from "lucide-react";
 import { cancelLlmCaption } from "../../../lib/desktopApi";
+import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
 import { useI18n } from "../../../lib/i18n";
 import type { DatasetAsset } from "../../../lib/types";
 import TranslatedCaptionEditor, {
@@ -30,6 +32,12 @@ type Props = {
   setLlmUserHint: (v: string) => void;
   triggerWord: string;
   setTriggerWord: (v: string) => void;
+  triggerWordScope: DatasetEditorTriggerScope;
+  setTriggerWordScope: (v: DatasetEditorTriggerScope) => void;
+  triggerWordGroupPath: string;
+  setTriggerWordGroupPath: (v: string) => void;
+  triggerGroupFolderOptions: { value: string; depth: number; label: string }[];
+  triggerTargetCount: number;
   triggerWordPosition: string;
   setTriggerWordPosition: (v: string) => void;
   caption: string;
@@ -49,6 +57,7 @@ type Props = {
   onDelete: () => Promise<void>;
   onApplyTriggerWordToAll: () => Promise<void>;
   onRemoveTriggerWordFromAll: () => Promise<void>;
+  showStyleCaptionHint: boolean;
   error: string | null;
 };
 
@@ -61,6 +70,12 @@ export function DatasetEditorCaptionsCard({
   setLlmUserHint,
   triggerWord,
   setTriggerWord,
+  triggerWordScope,
+  setTriggerWordScope,
+  triggerWordGroupPath,
+  setTriggerWordGroupPath,
+  triggerGroupFolderOptions,
+  triggerTargetCount,
   triggerWordPosition,
   setTriggerWordPosition,
   caption,
@@ -80,9 +95,32 @@ export function DatasetEditorCaptionsCard({
   onDelete,
   onApplyTriggerWordToAll,
   onRemoveTriggerWordFromAll,
+  showStyleCaptionHint,
   error,
 }: Props) {
   const { t } = useI18n();
+
+  const applyTriggerTitle = useMemo(() => {
+    const n = triggerTargetCount;
+    if (triggerWordScope === "group") {
+      return t("dataset.triggerScope.applyTitleGroup", { count: n });
+    }
+    if (triggerWordScope === "selection") {
+      return t("dataset.triggerScope.applyTitleSelection", { count: n });
+    }
+    return t("dataset.triggerScope.applyTitleAll", { count: n });
+  }, [t, triggerTargetCount, triggerWordScope]);
+
+  const removeTriggerTitle = useMemo(() => {
+    const n = triggerTargetCount;
+    if (triggerWordScope === "group") {
+      return t("dataset.triggerScope.removeTitleGroup", { count: n });
+    }
+    if (triggerWordScope === "selection") {
+      return t("dataset.triggerScope.removeTitleSelection", { count: n });
+    }
+    return t("dataset.triggerScope.removeTitleAll", { count: n });
+  }, [t, triggerTargetCount, triggerWordScope]);
 
   return (
     <div className="card" style={{ gridColumn: "span 4", gridRow: "span 3", animationDelay: "0.08s" }}>
@@ -136,6 +174,11 @@ export function DatasetEditorCaptionsCard({
           <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
             {t("dataset.llmUserHintDesc")}
           </div>
+          {showStyleCaptionHint ? (
+            <div style={{ fontSize: "0.72rem", color: "var(--accent-orange)", lineHeight: 1.35 }}>
+              {t("dataset.styleCaptionHint")}
+            </div>
+          ) : null}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
           <label className="form-label">{t("dataset.triggerWord")}</label>
@@ -160,9 +203,9 @@ export function DatasetEditorCaptionsCard({
                 alignSelf: "stretch",
                 minWidth: "2.75rem",
               }}
-              aria-label={t("dataset.applyTriggerWordAll")}
-              title={t("dataset.applyTriggerWordAll")}
-              disabled={imageEntriesLength === 0 || busy !== null || !triggerWord.trim()}
+              aria-label={applyTriggerTitle}
+              title={applyTriggerTitle}
+              disabled={triggerTargetCount === 0 || busy !== null || !triggerWord.trim()}
               onClick={() => void onApplyTriggerWordToAll()}
             >
               {busy === "trigger-all" ? (
@@ -181,9 +224,9 @@ export function DatasetEditorCaptionsCard({
                 alignSelf: "stretch",
                 minWidth: "2.75rem",
               }}
-              aria-label={t("dataset.removeTriggerWordAll")}
-              title={t("dataset.removeTriggerWordAll")}
-              disabled={imageEntriesLength === 0 || busy !== null || !triggerWord.trim()}
+              aria-label={removeTriggerTitle}
+              title={removeTriggerTitle}
+              disabled={triggerTargetCount === 0 || busy !== null || !triggerWord.trim()}
               onClick={() => void onRemoveTriggerWordFromAll()}
             >
               {busy === "trigger-remove" ? (
@@ -200,6 +243,15 @@ export function DatasetEditorCaptionsCard({
             onChangeRaw={setTriggerWordPosition}
             disabled={busy !== null}
             t={t}
+            scope={{
+              mode: triggerWordScope,
+              onChangeMode: setTriggerWordScope,
+              groupPath: triggerWordGroupPath,
+              onChangeGroupPath: setTriggerWordGroupPath,
+              folderOptions: triggerGroupFolderOptions,
+              targetCount: triggerTargetCount,
+              imageEntriesLength: imageEntriesLength,
+            }}
           />
         </div>
         <div

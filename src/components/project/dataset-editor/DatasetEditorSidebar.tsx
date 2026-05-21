@@ -50,7 +50,7 @@ type Props = {
   expandedDirs: Set<string>;
   selectedImagePaths: Set<string>;
   assetRelativePath: string | undefined;
-  batchRangeHighlight: { start: number; end: number } | null;
+  batchRangeHighlightPaths: Set<string> | null;
   batchProgress: BatchProgress | null;
   onToolbarCreateGroup: () => void;
   onExpandAll: () => void;
@@ -71,7 +71,7 @@ export function DatasetEditorSidebar({
   expandedDirs,
   selectedImagePaths,
   assetRelativePath,
-  batchRangeHighlight,
+  batchRangeHighlightPaths,
   batchProgress,
   onToolbarCreateGroup,
   onExpandAll,
@@ -333,12 +333,9 @@ export function DatasetEditorSidebar({
           }
 
           const entry = node.entry!;
-          const imageIndex = imageEntries.findIndex((e) => e.relativePath === entry.relativePath);
-          const oneBased = imageIndex + 1;
           const inBatchRange =
-            batchRangeHighlight !== null &&
-            oneBased >= batchRangeHighlight.start &&
-            oneBased <= batchRangeHighlight.end;
+            batchRangeHighlightPaths !== null &&
+            batchRangeHighlightPaths.has(entry.relativePath);
           const isActive = entry.relativePath === assetRelativePath;
           const isMultiSelected = selectedImagePaths.has(entry.relativePath);
           const isBatchWorking =

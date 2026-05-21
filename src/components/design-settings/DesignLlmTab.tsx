@@ -16,6 +16,7 @@ import {
   BUILTIN_PROMPT_ANIME_SD,
   BUILTIN_PROMPT_EN,
   BUILTIN_PROMPT_FOLLOW_UI,
+  BUILTIN_PROMPT_STYLE_LORA,
   BUILTIN_PROMPT_ZH_CN,
   createDefaultLlmSettings,
   DEFAULT_LLM_MAX_TOKENS,
@@ -136,6 +137,7 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
           { id: BUILTIN_PROMPT_EN, label: t("design.llmBuiltinEnglish") },
           { id: BUILTIN_PROMPT_ZH_CN, label: t("design.llmBuiltinZhCn") },
           { id: BUILTIN_PROMPT_ANIME_SD, label: t("design.llmBuiltinAnimeSd") },
+          { id: BUILTIN_PROMPT_STYLE_LORA, label: t("design.llmBuiltinStyleLora") },
         ],
       },
     ];

@@ -19,12 +19,15 @@ import {
   readCaption,
   removeDatasetGroup,
   renameDatasetGroup,
+  loadTrainingConfig,
   writeCaption,
 } from "../../lib/desktopApi";
 import { useI18n } from "../../lib/i18n";
+import { looksLikeStyleArtistTrainingConfig } from "../../lib/presets";
 import {
   loadDatasetEditorFormPersist,
   saveDatasetEditorFormPersist,
+  type DatasetEditorTriggerScope,
 } from "../../lib/datasetEditorPersistence";
 import { contiguousTagRangeForSelection, splitCaptionTags, charRangeForContiguousTagIndices } from "../../lib/captionSegments";
 import type { ApiLogEntry, DatasetAsset, DatasetEntry } from "../../lib/types";
@@ -45,6 +48,7 @@ import {
 } from "./dataset-editor/datasetEditorHelpers";
 import type { BatchProgress } from "./dataset-editor/datasetEditorTypes";
 import { pullDatasetSidebarEntries, withDatasetSidebarRefresh } from "./dataset-editor/datasetSidebarSync";
+import { resolveScopedImagePaths } from "./dataset-editor/datasetImageScope";
 import {
   buildDatasetTree,
   collectAllDirectoryPaths,
@@ -70,6 +74,9 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   const [apiLogDrawerOpen, setApiLogDrawerOpen] = useState(false);
   const [apiLogLines, setApiLogLines] = useState<ApiLogEntry[]>([]);
   const [taggingMode, setTaggingMode] = useState<"all" | "range">("all");
+  const [batchTaggingScope, setBatchTaggingScope] = useState<DatasetEditorTriggerScope>("all");
+  /** Folder path when `batchTaggingScope === "group"`; "" = images at dataset root only. */
+  const [batchTaggingGroupPath, setBatchTaggingGroupPath] = useState("");
   const [imageRange, setImageRange] = useState("");
   const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
   const [triggerWord, setTriggerWord] = useState("");
@@ -78,8 +85,12 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
    * See `parseTriggerWordPosition` for the supported value grammar.
    */
   const [triggerWordPosition, setTriggerWordPosition] = useState("");
+  const [triggerWordScope, setTriggerWordScope] = useState<DatasetEditorTriggerScope>("all");
+  /** Folder path when `triggerWordScope === "group"`; "" = images at dataset root only. */
+  const [triggerWordGroupPath, setTriggerWordGroupPath] = useState("");
   /** Optional text sent to the LLM with the image to reduce mis-tags. */
   const [llmUserHint, setLlmUserHint] = useState("");
+  const [styleTrainingCaptions, setStyleTrainingCaptions] = useState(false);
   /** Avoid writing another project's form snapshot before hydrate completes (projectId switch). */
   const [persistReadyProjectId, setPersistReadyProjectId] = useState<string | null>(null);
   const captionRef = useRef(caption);
@@ -166,10 +177,32 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     setLlmUserHint(saved?.llmUserHint ?? "");
     setTriggerWord(saved?.triggerWord ?? "");
     setTriggerWordPosition(saved?.triggerWordPosition ?? "");
+    setTriggerWordScope(saved?.triggerWordScope ?? "all");
+    setTriggerWordGroupPath(saved?.triggerWordGroupPath ?? "");
+    setBatchTaggingScope(saved?.batchTaggingScope ?? "all");
+    setBatchTaggingGroupPath(saved?.batchTaggingGroupPath ?? "");
     setImageRange(saved?.imageRange ?? "");
     setTaggingMode(saved?.taggingMode === "range" ? "range" : "all");
     setPreviewDockOpen(Boolean(saved?.previewDockOpen));
     setPersistReadyProjectId(projectId);
+  }, [projectId]);
+
+  useEffect(() => {
+    let mounted = true;
+    void loadTrainingConfig(projectId)
+      .then((cfg) => {
+        if (mounted) {
+          setStyleTrainingCaptions(looksLikeStyleArtistTrainingConfig(cfg));
+        }
+      })
+      .catch(() => {
+        if (mounted) {
+          setStyleTrainingCaptions(false);
+        }
+      });
+    return () => {
+      mounted = false;
+    };
   }, [projectId]);
 
   useEffect(() => {
@@ -178,6 +211,10 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       llmUserHint,
       triggerWord,
       triggerWordPosition,
+      triggerWordScope,
+      triggerWordGroupPath,
+      batchTaggingScope,
+      batchTaggingGroupPath,
       imageRange,
       taggingMode,
       previewDockOpen,
@@ -188,6 +225,10 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     llmUserHint,
     triggerWord,
     triggerWordPosition,
+    triggerWordScope,
+    triggerWordGroupPath,
+    batchTaggingScope,
+    batchTaggingGroupPath,
     imageRange,
     taggingMode,
     previewDockOpen,
@@ -358,6 +399,11 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
    */
   const imagesUnderDirectory = useCallback(
     (dirPath: string): string[] => {
+      if (!dirPath) {
+        return imageEntries
+          .filter((entry) => parentRelativePath(entry.relativePath) === "")
+          .map((entry) => entry.relativePath);
+      }
       const prefix = dirPath.endsWith("/") ? dirPath : `${dirPath}/`;
       return imageEntries
         .filter((entry) => entry.relativePath.startsWith(prefix))
@@ -365,6 +411,93 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     },
     [imageEntries],
   );
+
+  /** Sidebar folder rows for the trigger-word "group" scope dropdown (sorted path order). */
+  const triggerGroupFolderOptions = useMemo(() => {
+    const dirs = entries.filter((e) => e.kind === "directory");
+    dirs.sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+    return dirs.map((d) => ({
+      value: d.relativePath,
+      depth: d.depth,
+      label: d.relativePath,
+    }));
+  }, [entries]);
+
+  const existingImagePathSet = useMemo(
+    () => new Set(imageEntries.map((e) => e.relativePath)),
+    [imageEntries],
+  );
+
+  const allImagePaths = useMemo(
+    () => imageEntries.map((e) => e.relativePath),
+    [imageEntries],
+  );
+
+  /** Relative paths that receive bulk trigger insert/remove for the current scope UI. */
+  const triggerTargetPaths = useMemo(
+    () =>
+      resolveScopedImagePaths(
+        triggerWordScope,
+        allImagePaths,
+        imagesUnderDirectory,
+        triggerWordGroupPath,
+        selectedImagePaths,
+        existingImagePathSet,
+      ),
+    [
+      allImagePaths,
+      existingImagePathSet,
+      imagesUnderDirectory,
+      selectedImagePaths,
+      triggerWordGroupPath,
+      triggerWordScope,
+    ],
+  );
+
+  /** Images included in batch LLM tagging for the current batch scope UI. */
+  const batchTaggingTargetEntries = useMemo(() => {
+    const pathSet = new Set(
+      resolveScopedImagePaths(
+        batchTaggingScope,
+        allImagePaths,
+        imagesUnderDirectory,
+        batchTaggingGroupPath,
+        selectedImagePaths,
+        existingImagePathSet,
+      ),
+    );
+    return imageEntries.filter((e) => pathSet.has(e.relativePath));
+  }, [
+    allImagePaths,
+    batchTaggingGroupPath,
+    batchTaggingScope,
+    existingImagePathSet,
+    imageEntries,
+    imagesUnderDirectory,
+    selectedImagePaths,
+  ]);
+
+  useEffect(() => {
+    if (triggerWordScope !== "group") return;
+    if (triggerWordGroupPath === "") return;
+    const stillExists = entries.some(
+      (e) => e.kind === "directory" && e.relativePath === triggerWordGroupPath,
+    );
+    if (!stillExists) {
+      setTriggerWordGroupPath("");
+    }
+  }, [entries, triggerWordGroupPath, triggerWordScope]);
+
+  useEffect(() => {
+    if (batchTaggingScope !== "group") return;
+    if (batchTaggingGroupPath === "") return;
+    const stillExists = entries.some(
+      (e) => e.kind === "directory" && e.relativePath === batchTaggingGroupPath,
+    );
+    if (!stillExists) {
+      setBatchTaggingGroupPath("");
+    }
+  }, [batchTaggingGroupPath, batchTaggingScope, entries]);
 
   /**
    * Reloads the dataset listing after a structural change and tries to keep the
@@ -650,10 +783,19 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     setZhPartitionHighlight(null);
   }, [currentImage?.relativePath]);
 
-  const batchRangeHighlight = useMemo(() => {
+  const batchRangeHighlightPaths = useMemo(() => {
     if (!previewDockOpen || !batchFlyoutOpen || taggingMode !== "range") return null;
-    return parseBatchImageRange(imageRange, imageEntries.length);
-  }, [previewDockOpen, batchFlyoutOpen, taggingMode, imageRange, imageEntries.length]);
+    const range = parseBatchImageRange(imageRange, batchTaggingTargetEntries.length);
+    if (!range) return null;
+    const slice = batchTaggingTargetEntries.slice(range.start - 1, range.end);
+    return new Set(slice.map((e) => e.relativePath));
+  }, [
+    previewDockOpen,
+    batchFlyoutOpen,
+    taggingMode,
+    imageRange,
+    batchTaggingTargetEntries,
+  ]);
 
   const previousImage = selectedImageIndex > 0 ? imageEntries[selectedImageIndex - 1] : null;
   const nextImage =
@@ -1093,18 +1235,23 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   };
 
   const runBatchTagging = useCallback(async () => {
-    if (imageEntries.length === 0 || busy !== null) return;
+    if (batchTaggingTargetEntries.length === 0 || busy !== null) {
+      if (imageEntries.length > 0 && batchTaggingTargetEntries.length === 0) {
+        setError(t("dataset.batchTaggingScope.empty"));
+      }
+      return;
+    }
 
     let targets: DatasetEntry[];
     if (taggingMode === "all") {
-      targets = imageEntries;
+      targets = batchTaggingTargetEntries;
     } else {
-      const range = parseBatchImageRange(imageRange, imageEntries.length);
+      const range = parseBatchImageRange(imageRange, batchTaggingTargetEntries.length);
       if (!range) {
         setError(t("dataset.batchInvalidRange"));
         return;
       }
-      targets = imageEntries.slice(range.start - 1, range.end);
+      targets = batchTaggingTargetEntries.slice(range.start - 1, range.end);
     }
 
     if (targets.length === 0) {
@@ -1183,8 +1330,9 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     }
   }, [
     busy,
+    batchTaggingTargetEntries,
     currentImage?.relativePath,
-    imageEntries,
+    imageEntries.length,
     imageRange,
     loadAsset,
     projectId,
@@ -1199,7 +1347,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       setError(t("dataset.triggerWordEmpty"));
       return;
     }
-    if (imageEntries.length === 0 || busy !== null) {
+    if (triggerTargetPaths.length === 0 || busy !== null) {
       return;
     }
 
@@ -1208,12 +1356,12 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     setBusy("trigger-all");
     setError(null);
     try {
-      for (const entry of imageEntries) {
-        const raw = await readCaption(projectId, entry.relativePath);
+      for (const relativePath of triggerTargetPaths) {
+        const raw = await readCaption(projectId, relativePath);
         const trimmed = raw.trim();
         const next = buildCaptionWithTriggerAt(trimmed, tw, positionIndex);
         if (next !== null) {
-          await writeCaption(projectId, entry.relativePath, next);
+          await writeCaption(projectId, relativePath, next);
         }
       }
       if (currentImage) {
@@ -1224,7 +1372,16 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     } finally {
       setBusy(null);
     }
-  }, [busy, currentImage, imageEntries, loadAsset, projectId, t, triggerWord, triggerWordPosition]);
+  }, [
+    busy,
+    currentImage,
+    loadAsset,
+    projectId,
+    t,
+    triggerTargetPaths,
+    triggerWord,
+    triggerWordPosition,
+  ]);
 
   const removeTriggerWordFromAll = useCallback(async () => {
     const tw = triggerWord.trim();
@@ -1232,19 +1389,19 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       setError(t("dataset.triggerWordEmpty"));
       return;
     }
-    if (imageEntries.length === 0 || busy !== null) {
+    if (triggerTargetPaths.length === 0 || busy !== null) {
       return;
     }
 
     setBusy("trigger-remove");
     setError(null);
     try {
-      for (const entry of imageEntries) {
-        const raw = await readCaption(projectId, entry.relativePath);
+      for (const relativePath of triggerTargetPaths) {
+        const raw = await readCaption(projectId, relativePath);
         const trimmed = raw.trim();
         const next = removeTriggerWordFromCaptionAllSegments(trimmed, tw);
         if (next !== null) {
-          await writeCaption(projectId, entry.relativePath, next);
+          await writeCaption(projectId, relativePath, next);
         }
       }
       if (currentImage) {
@@ -1255,7 +1412,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     } finally {
       setBusy(null);
     }
-  }, [busy, currentImage, imageEntries, loadAsset, projectId, t, triggerWord]);
+  }, [busy, currentImage, loadAsset, projectId, t, triggerTargetPaths, triggerWord]);
 
   return (
     <div className="bento bento-detail view-dataset">
@@ -1267,7 +1424,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         expandedDirs={expandedDirs}
         selectedImagePaths={selectedImagePaths}
         assetRelativePath={asset?.relativePath}
-        batchRangeHighlight={batchRangeHighlight}
+        batchRangeHighlightPaths={batchRangeHighlightPaths}
         batchProgress={batchProgress}
         onToolbarCreateGroup={() => {
           const paths = Array.from(selectedImagePaths);
@@ -1318,6 +1475,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       <DatasetEditorPreviewCard
         asset={asset}
         imageEntriesLength={imageEntries.length}
+        batchTaggingTargetCount={batchTaggingTargetEntries.length}
         selectedImageIndex={selectedImageIndex}
         previewDockOpen={previewDockOpen}
         batchFlyoutOpen={batchFlyoutOpen}
@@ -1325,6 +1483,11 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         setPreviewDockOpen={setPreviewDockOpen}
         setBatchFlyoutOpen={setBatchFlyoutOpen}
         setApiLogDrawerOpen={setApiLogDrawerOpen}
+        batchTaggingScope={batchTaggingScope}
+        setBatchTaggingScope={setBatchTaggingScope}
+        batchTaggingGroupPath={batchTaggingGroupPath}
+        setBatchTaggingGroupPath={setBatchTaggingGroupPath}
+        batchTaggingFolderOptions={triggerGroupFolderOptions}
         taggingMode={taggingMode}
         setTaggingMode={setTaggingMode}
         imageRange={imageRange}
@@ -1349,6 +1512,12 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         setLlmUserHint={setLlmUserHint}
         triggerWord={triggerWord}
         setTriggerWord={setTriggerWord}
+        triggerWordScope={triggerWordScope}
+        setTriggerWordScope={setTriggerWordScope}
+        triggerWordGroupPath={triggerWordGroupPath}
+        setTriggerWordGroupPath={setTriggerWordGroupPath}
+        triggerGroupFolderOptions={triggerGroupFolderOptions}
+        triggerTargetCount={triggerTargetPaths.length}
         triggerWordPosition={triggerWordPosition}
         setTriggerWordPosition={setTriggerWordPosition}
         caption={caption}
@@ -1371,6 +1540,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         onDelete={handleDelete}
         onApplyTriggerWordToAll={applyTriggerWordToAll}
         onRemoveTriggerWordFromAll={removeTriggerWordFromAll}
+        showStyleCaptionHint={styleTrainingCaptions}
         error={error}
       />
 

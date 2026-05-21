@@ -1,5 +1,7 @@
 const STORAGE_NS = "loraForge.datasetEditorForm.v1";
 
+export type DatasetEditorTriggerScope = "all" | "group" | "selection";
+
 export type DatasetEditorFormPersist = {
   llmUserHint: string;
   triggerWord: string;
@@ -17,6 +19,14 @@ export type DatasetEditorFormPersist = {
    * for future UX needs and is round-tripped verbatim through persistence.
    */
   triggerWordPosition: string;
+  /** Which images receive bulk trigger-word insert/remove from the captions card. */
+  triggerWordScope: DatasetEditorTriggerScope;
+  /** Dataset-relative folder path when `triggerWordScope` is `group`; `""` means root-level images only. */
+  triggerWordGroupPath: string;
+  /** Which images are included in batch LLM tagging (independent from trigger-word scope). */
+  batchTaggingScope: DatasetEditorTriggerScope;
+  /** Dataset-relative folder path when `batchTaggingScope` is `group`; `""` means root-level images only. */
+  batchTaggingGroupPath: string;
   imageRange: string;
   taggingMode: "all" | "range";
   /** Vertical preview tool dock next to image (legacy key `showBatchPanel`). */
@@ -43,11 +53,23 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
         : typeof parsed.showBatchPanel === "boolean"
           ? parsed.showBatchPanel
           : false;
+    const scopeRaw = parsed.triggerWordScope;
+    const triggerWordScope: DatasetEditorTriggerScope =
+      scopeRaw === "group" || scopeRaw === "selection" ? scopeRaw : "all";
+    const batchScopeRaw = parsed.batchTaggingScope;
+    const batchTaggingScope: DatasetEditorTriggerScope =
+      batchScopeRaw === "group" || batchScopeRaw === "selection" ? batchScopeRaw : "all";
     return {
       llmUserHint: typeof parsed.llmUserHint === "string" ? parsed.llmUserHint : "",
       triggerWord: typeof parsed.triggerWord === "string" ? parsed.triggerWord : "",
       triggerWordPosition:
         typeof parsed.triggerWordPosition === "string" ? parsed.triggerWordPosition : "",
+      triggerWordScope,
+      triggerWordGroupPath:
+        typeof parsed.triggerWordGroupPath === "string" ? parsed.triggerWordGroupPath : "",
+      batchTaggingScope,
+      batchTaggingGroupPath:
+        typeof parsed.batchTaggingGroupPath === "string" ? parsed.batchTaggingGroupPath : "",
       imageRange: typeof parsed.imageRange === "string" ? parsed.imageRange : "",
       taggingMode,
       previewDockOpen: dockLegacy,

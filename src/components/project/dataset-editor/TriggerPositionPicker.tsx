@@ -1,7 +1,159 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ChevronDown, ChevronsLeft, ChevronsRight, PlusCircle } from "lucide-react";
+import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
 import type { TranslateFn } from "../../../lib/i18n";
 import { resolveTriggerInsertSlot, splitCaptionTagsForPreview } from "./datasetEditorHelpers";
+
+export type TriggerScopeFolderOption = { value: string; depth: number; label: string };
+
+export type TriggerPositionPickerScope = {
+  mode: DatasetEditorTriggerScope;
+  onChangeMode: (next: DatasetEditorTriggerScope) => void;
+  groupPath: string;
+  onChangeGroupPath: (next: string) => void;
+  folderOptions: TriggerScopeFolderOption[];
+  targetCount: number;
+  imageEntriesLength: number;
+};
+
+function useDismissOnOutside<E extends HTMLElement>(
+  open: boolean,
+  onClose: () => void,
+  containerRef: RefObject<E | null>,
+) {
+  useEffect(() => {
+    if (!open) return;
+    const onDocMouseDown = (ev: MouseEvent) => {
+      const el = containerRef.current;
+      const t = ev.target;
+      if (!(t instanceof Node)) return;
+      if (el?.contains(t)) return;
+      onClose();
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [open, onClose, containerRef]);
+}
+
+function TriggerMenuButton({
+  ariaLabel,
+  disabled,
+  open,
+  onOpenChange,
+  triggerLabel,
+  menuAlign,
+  children,
+}: {
+  ariaLabel: string;
+  disabled?: boolean;
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  triggerLabel: string;
+  /** Match trigger width vs grow for long folder paths */
+  menuAlign: "trigger" | "wide";
+  children: ReactNode;
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useDismissOnOutside(open, () => onOpenChange(false), wrapRef);
+
+  return (
+    <div
+      ref={wrapRef}
+      style={{
+        position: "relative",
+        alignSelf: "stretch",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        flex: menuAlign === "wide" ? "1 1 11rem" : "0 1 auto",
+        minWidth: menuAlign === "wide" ? "11rem" : "9rem",
+        maxWidth: "100%",
+      }}
+    >
+      <button
+        type="button"
+        className="lf-trigger-menu-trigger"
+        disabled={disabled}
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        onClick={() => !disabled && onOpenChange(!open)}
+      >
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            textAlign: "left",
+            flex: 1,
+          }}
+        >
+          {triggerLabel}
+        </span>
+        <ChevronDown
+          size={14}
+          aria-hidden
+          style={{
+            transition: "transform 120ms ease",
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+          }}
+        />
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          className="lf-trigger-menu-panel"
+          style={{
+            position: "absolute",
+            zIndex: 40,
+            left: 0,
+            top: "calc(100% + 4px)",
+            width: menuAlign === "trigger" ? "100%" : "max-content",
+            minWidth: menuAlign === "trigger" ? "100%" : "14rem",
+            maxWidth: "min(22rem, calc(100vw - 2rem))",
+            maxHeight: "14rem",
+            overflowY: "auto",
+            overflowX: "hidden",
+          }}
+        >
+          {children}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TriggerMenuOption({
+  selected,
+  disabled,
+  onPick,
+  paddingLeftRem,
+  children,
+}: {
+  selected?: boolean;
+  disabled?: boolean;
+  onPick: () => void;
+  paddingLeftRem?: number;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      className="lf-trigger-menu-option"
+      aria-selected={selected}
+      disabled={disabled}
+      style={{
+        padding: `0.4rem 0.6rem 0.4rem ${paddingLeftRem ?? 0.65}rem`,
+      }}
+      onClick={() => {
+        if (!disabled) onPick();
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 /**
  * Single insertion-point marker between (or at the ends of) the tag chain.
@@ -131,6 +283,7 @@ export function TriggerPositionPicker({
   onChangeRaw,
   disabled,
   t,
+  scope,
 }: {
   caption: string;
   triggerWord: string;
@@ -138,10 +291,13 @@ export function TriggerPositionPicker({
   onChangeRaw: (next: string) => void;
   disabled: boolean;
   t: TranslateFn;
+  scope?: TriggerPositionPickerScope;
 }) {
   // Collapsed by default to keep the form compact; expand only when the user
   // wants to fine-tune the slot via the visual chain.
   const [expanded, setExpanded] = useState(false);
+  const [scopeModeOpen, setScopeModeOpen] = useState(false);
+  const [scopeFolderOpen, setScopeFolderOpen] = useState(false);
 
   const tags = useMemo(() => splitCaptionTagsForPreview(caption), [caption]);
   const tagCount = tags.length;
@@ -170,6 +326,27 @@ export function TriggerPositionPicker({
     if (selectedSlot >= tagCount) return t("dataset.triggerPosition.atEnd");
     return t("dataset.triggerPosition.afterNth", { n: selectedSlot });
   }, [selectedSlot, tagCount, t]);
+
+  const modeTriggerLabel = useMemo(() => {
+    if (!scope) return "";
+    if (scope.mode === "all") return t("dataset.triggerScope.all");
+    if (scope.mode === "group") return t("dataset.triggerScope.group");
+    return t("dataset.triggerScope.selection");
+  }, [scope, t]);
+
+  const folderTriggerLabel = useMemo(() => {
+    if (!scope) return "";
+    if (scope.groupPath === "") return t("dataset.triggerScope.rootFolder");
+    const hit = scope.folderOptions.find((o) => o.value === scope.groupPath);
+    return hit?.label ?? scope.groupPath;
+  }, [scope, t]);
+
+  const scopeSummary = useMemo(() => {
+    if (!scope) return "";
+    if (scope.mode === "all") return t("dataset.triggerScope.all");
+    if (scope.mode === "selection") return t("dataset.triggerScope.selection");
+    return scope.groupPath === "" ? t("dataset.triggerScope.rootFolder") : scope.groupPath;
+  }, [scope, t]);
 
   const MAX_VISIBLE = 14;
   // Window-sliding around the selected slot keeps it visible in long captions
@@ -222,6 +399,7 @@ export function TriggerPositionPicker({
     >
       <button
         type="button"
+        className="lf-trigger-pos-picker-toggle"
         onClick={() => setExpanded((v) => !v)}
         disabled={disabled}
         aria-expanded={expanded}
@@ -231,14 +409,11 @@ export function TriggerPositionPicker({
           alignItems: "center",
           justifyContent: "space-between",
           gap: "0.5rem",
-          padding: "0.4rem 0.6rem",
+          padding: "0.45rem 0.65rem",
           background: "transparent",
           border: "none",
           borderBottom: expanded ? "1px solid var(--border-dim)" : "none",
-          color: "var(--text-muted)",
-          fontSize: "0.72rem",
           cursor: disabled ? "not-allowed" : "pointer",
-          font: "inherit",
           textAlign: "left",
           width: "100%",
         }}
@@ -247,38 +422,39 @@ export function TriggerPositionPicker({
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: "0.4rem",
+            gap: "0.45rem",
             minWidth: 0,
             overflow: "hidden",
           }}
         >
-          <span
-            style={{
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              flexShrink: 0,
-            }}
-          >
-            {t("dataset.triggerPosition.label")}
-          </span>
-          <span
-            style={{
-              color: "var(--accent-acid)",
-              fontWeight: 600,
-              fontVariantNumeric: "tabular-nums",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {positionLabel}
-          </span>
+          <span className="lf-trigger-pos-picker-kicker">{t("dataset.triggerPosition.label")}</span>
+          <span className="lf-trigger-pos-picker-summary-slot">{positionLabel}</span>
+          {scope ? (
+            <>
+              <span style={{ color: "var(--text-muted)", flexShrink: 0 }} aria-hidden>
+                ·
+              </span>
+              <span
+                className="lf-trigger-pos-picker-summary-scope"
+                style={{
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  maxWidth: "11rem",
+                }}
+                title={scopeSummary}
+              >
+                {scopeSummary}
+              </span>
+            </>
+          ) : null}
         </span>
         <ChevronDown
           size={14}
           aria-hidden
           style={{
             flexShrink: 0,
+            color: "var(--text-muted)",
             transition: "transform 120ms ease",
             transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
           }}
@@ -290,24 +466,111 @@ export function TriggerPositionPicker({
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: "0.4rem",
-            padding: "0.5rem 0.6rem",
+            gap: "0.55rem",
+            padding: "0.55rem 0.65rem",
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "0.3rem",
-              flexWrap: "wrap",
-            }}
-          >
+          {scope ? (
+            <>
+              <div className="lf-trigger-scope-block">
+                <div className="lf-trigger-field-label">{t("dataset.triggerScope.label")}</div>
+                <div className="lf-trigger-scope-row">
+                  <TriggerMenuButton
+                    ariaLabel={t("dataset.triggerScope.label")}
+                    disabled={disabled || scope.imageEntriesLength === 0}
+                    open={scopeModeOpen}
+                    onOpenChange={(v) => {
+                      setScopeModeOpen(v);
+                      if (v) setScopeFolderOpen(false);
+                    }}
+                    triggerLabel={modeTriggerLabel}
+                    menuAlign="trigger"
+                  >
+                    <div className="lf-trigger-menu-panel-inner">
+                      <TriggerMenuOption
+                        selected={scope.mode === "all"}
+                        onPick={() => {
+                          scope.onChangeMode("all");
+                          setScopeModeOpen(false);
+                        }}
+                      >
+                        {t("dataset.triggerScope.all")}
+                      </TriggerMenuOption>
+                      <TriggerMenuOption
+                        selected={scope.mode === "group"}
+                        onPick={() => {
+                          scope.onChangeMode("group");
+                          setScopeModeOpen(false);
+                        }}
+                      >
+                        {t("dataset.triggerScope.group")}
+                      </TriggerMenuOption>
+                      <TriggerMenuOption
+                        selected={scope.mode === "selection"}
+                        onPick={() => {
+                          scope.onChangeMode("selection");
+                          setScopeModeOpen(false);
+                        }}
+                      >
+                        {t("dataset.triggerScope.selection")}
+                      </TriggerMenuOption>
+                    </div>
+                </TriggerMenuButton>
+                {scope.mode === "group" ? (
+                  <TriggerMenuButton
+                    ariaLabel={t("dataset.triggerScope.folderMenuAria")}
+                    disabled={disabled || scope.imageEntriesLength === 0}
+                    open={scopeFolderOpen}
+                    onOpenChange={(v) => {
+                      setScopeFolderOpen(v);
+                      if (v) setScopeModeOpen(false);
+                    }}
+                    triggerLabel={folderTriggerLabel}
+                    menuAlign="wide"
+                  >
+                    <div className="lf-trigger-menu-panel-inner">
+                      <TriggerMenuOption
+                        selected={scope.groupPath === ""}
+                        paddingLeftRem={0.65}
+                        onPick={() => {
+                          scope.onChangeGroupPath("");
+                          setScopeFolderOpen(false);
+                        }}
+                      >
+                        {t("dataset.triggerScope.rootFolder")}
+                      </TriggerMenuOption>
+                      {scope.folderOptions.map((opt) => (
+                        <TriggerMenuOption
+                          key={opt.value}
+                          selected={scope.groupPath === opt.value}
+                          paddingLeftRem={0.65 + Math.max(0, opt.depth) * 0.65}
+                          onPick={() => {
+                            scope.onChangeGroupPath(opt.value);
+                            setScopeFolderOpen(false);
+                          }}
+                        >
+                          {opt.label}
+                        </TriggerMenuOption>
+                      ))}
+                    </div>
+                  </TriggerMenuButton>
+                ) : null}
+              </div>
+              {scope.mode === "selection" ? (
+                <div className="lf-trigger-hint">{t("dataset.triggerScope.selectionHint")}</div>
+              ) : null}
+              <div className="lf-trigger-hint">
+                {t("dataset.triggerScope.targetCount", { count: scope.targetCount })}
+              </div>
+              <hr className="lf-trigger-sep" />
+            </div>
+            </>
+          ) : null}
+          <div className="lf-trigger-slot-toolbar">
             <button
               type="button"
               className="btn"
               style={{
-                padding: "0.2rem 0.55rem",
-                fontSize: "0.7rem",
                 borderColor:
                   selectedSlot <= 0 ? "var(--accent-acid)" : "var(--border-dim)",
                 color: selectedSlot <= 0 ? "var(--accent-acid)" : undefined,
@@ -324,8 +587,6 @@ export function TriggerPositionPicker({
               type="button"
               className="btn"
               style={{
-                padding: "0.2rem 0.55rem",
-                fontSize: "0.7rem",
                 borderColor:
                   tagCount > 0 && selectedSlot >= tagCount
                     ? "var(--accent-acid)"
@@ -343,13 +604,7 @@ export function TriggerPositionPicker({
             </button>
             <input
               type="number"
-              className="form-input"
-              style={{
-                width: "3.6rem",
-                padding: "0.2rem 0.35rem",
-                fontSize: "0.72rem",
-                textAlign: "center",
-              }}
+              className="form-input lf-trigger-slot-input"
               placeholder="0"
               title={t("dataset.triggerPosition.numericHint")}
               aria-label={t("dataset.triggerPosition.numericLabel")}
@@ -364,17 +619,15 @@ export function TriggerPositionPicker({
 
           <div
             role="radiogroup"
+            className="lf-trigger-tag-chain"
             aria-label={t("dataset.triggerPosition.label")}
             style={{
               display: "flex",
               alignItems: "center",
               flexWrap: "wrap",
-              gap: "0.15rem",
-              padding: "0.25rem 0",
+              gap: "0.2rem",
+              padding: "0.35rem 0",
               minHeight: "2.1rem",
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.72rem",
-              lineHeight: 1.1,
             }}
           >
             {tagCount === 0 ? (

@@ -131,6 +131,12 @@ pub struct TrainingConfig {
     pub conv_alpha: u32,
     pub network_dropout: String,
     pub batch_size: u32,
+    /// `steps` → CLI `--max_train_steps` (`max_train_steps`). `epochs` → `--max_train_epochs` (`epochs`). Mutually exclusive.
+    #[serde(default = "default_training_length_mode")]
+    pub training_length_mode: String,
+    /// Total optimizer steps when `training_length_mode == "steps"`.
+    #[serde(default = "default_max_train_steps_config")]
+    pub max_train_steps: u32,
     pub epochs: u32,
     pub save_every_n_epochs: u32,
     pub mixed_precision: String,
@@ -164,7 +170,6 @@ pub struct TrainingConfig {
     pub xformers: bool,
     pub shuffle_captions: bool,
     pub color_jitter: bool,
-    pub steps_per_epoch: u32,
     pub save_every_n_steps: u32,
     pub save_last_n_epochs: u32,
     pub save_last_n_steps: u32,
@@ -214,6 +219,14 @@ fn default_prior_caption_mode() -> PriorCaptionMode {
 
 fn default_u32_zero() -> u32 {
     0
+}
+
+fn default_training_length_mode() -> String {
+    "steps".to_string()
+}
+
+fn default_max_train_steps_config() -> u32 {
+    6000
 }
 
 /// 上游 chat/completions 协议口径（决定如何注入 reasoning/thinking 字段、是否发 max_completion_tokens 等）。
@@ -363,6 +376,8 @@ impl Default for TrainingConfig {
             conv_alpha: 0,
             network_dropout: "0".to_string(),
             batch_size: 4,
+            training_length_mode: default_training_length_mode(),
+            max_train_steps: default_max_train_steps_config(),
             epochs: 20,
             save_every_n_epochs: 1,
             mixed_precision: "bf16".to_string(),
@@ -396,7 +411,6 @@ impl Default for TrainingConfig {
             xformers: true,
             shuffle_captions: true,
             color_jitter: false,
-            steps_per_epoch: 300,
             save_every_n_steps: 0,
             save_last_n_epochs: 0,
             save_last_n_steps: 0,
@@ -471,14 +485,22 @@ impl TrainingConfig {
         if self.batch_size == 0 {
             return Err("Batch size must be greater than zero".to_string());
         }
-        if self.epochs == 0 {
-            return Err("Epochs must be greater than zero".to_string());
+        let length_mode = self.training_length_mode.to_ascii_lowercase();
+        if length_mode != "steps" && length_mode != "epochs" {
+            return Err(format!(
+                "Training length mode must be 'steps' or 'epochs', got '{}'",
+                self.training_length_mode.trim()
+            ));
+        }
+        if length_mode == "steps" {
+            if self.max_train_steps == 0 {
+                return Err("Max train steps must be greater than zero when using step-based training length".to_string());
+            }
+        } else if self.epochs == 0 {
+            return Err("Epochs must be greater than zero when using epoch-based training length".to_string());
         }
         if self.save_every_n_epochs == 0 {
             return Err("Save frequency must be greater than zero".to_string());
-        }
-        if self.steps_per_epoch == 0 {
-            return Err("Steps per epoch must be greater than zero".to_string());
         }
         if self.dataset_repeats == 0 {
             return Err("Dataset repeats must be greater than zero".to_string());
@@ -513,11 +535,12 @@ impl TrainingConfig {
                 return Err("Maximum bucket resolution must be greater than or equal to the larger training resolution side".to_string());
             }
         }
-        let max_train_steps = self.epochs.saturating_mul(self.steps_per_epoch);
-        if self.initial_step > 0 && self.initial_step >= max_train_steps {
-            return Err("Initial step must be smaller than the total train steps".to_string());
+        if length_mode == "steps" {
+            if self.initial_step > 0 && self.initial_step >= self.max_train_steps {
+                return Err("Initial step must be smaller than the total train steps".to_string());
+            }
         }
-        if self.initial_epoch > self.epochs {
+        if length_mode == "epochs" && self.initial_epoch > self.epochs {
             return Err("Initial epoch cannot exceed the total epochs".to_string());
         }
         let sample_sampler = self.sample_sampler.trim();

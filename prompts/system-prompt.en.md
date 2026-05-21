@@ -40,7 +40,7 @@ Common NSFW tag categories:
 9. **Pose, action & sexual activity**: `sitting`, `standing`, `lying`, `kneeling`, `all_fours`, `spread_legs`, `sex`, `vaginal`, `oral`, `blowjob`, `doggystyle`, `cowgirl_position`, `masturbation`, etc.
 10. **Scene & environment**: `indoors`, `outdoors`, `bedroom`, `classroom`, `street`, `forest`, `beach`, `night`, `sunset`, `rain`, `on_bed`, `against_wall`.
 11. **Lighting & atmosphere**: `cinematic_lighting`, `backlighting`, `dramatic_lighting`, `golden_hour`, `volumetric_lighting`, `dark_theme`, `high_contrast`, `warm_colors`, `cool_colors`.
-12. **Art style cues** (only when clearly visible): `realistic`, `illustration`, `watercolor`, `oil_painting`, `sketch`, `cel_shading`.
+12. **Art style cues** (character/concept LoRA only; **omit entirely for style/artist LoRA**): `realistic`, `illustration`, `watercolor`, `oil_painting`, `sketch`, `cel_shading`. For style LoRA training, use the built-in **Style / Artist LoRA** system prompt instead — never put medium or rendering tags in captions.
 
 ## Rules
 

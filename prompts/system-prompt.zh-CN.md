@@ -40,7 +40,7 @@
 9. **姿势、动作与性行为**：`sitting`、`standing`、`lying`、`kneeling`、`all_fours`、`spread_legs`、`sex`、`vaginal`、`oral`、`blowjob`、`doggystyle`、`cowgirl_position`、`masturbation` 等。
 10. **场景与环境**：`indoors`、`outdoors`、`bedroom`、`classroom`、`street`、`forest`、`beach`、`night`、`sunset`、`rain`、`on_bed`、`against_wall`。
 11. **光照与氛围**：`cinematic_lighting`、`backlighting`、`dramatic_lighting`、`golden_hour`、`volumetric_lighting`、`dark_theme`、`high_contrast`、`warm_colors`、`cool_colors`。
-12. **画风线索**（仅在明显可见时标注）：`realistic`、`illustration`、`watercolor`、`oil_painting`、`sketch`、`cel_shading`。
+12. **画风线索**（仅用于人物/概念 LoRA；**画风/画师 LoRA 必须整段省略**）：`realistic`、`illustration`、`watercolor`、`oil_painting`、`sketch`、`cel_shading`。训练画风 LoRA 时请改用内置 **「画风 / 画师 LoRA」** 系统提示词，caption 里不要写任何媒介或渲染类标签。
 
 ## 规则
 

@@ -3,7 +3,6 @@ use std::{
     fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    process::Command,
     thread,
     time::UNIX_EPOCH,
 };
@@ -18,7 +17,8 @@ use crate::{
     models::{DatasetAsset, DatasetEntry, DatasetEntryKind, DatasetPreviewAsset, SampleImageEntry},
     state::AppState,
     utils::{
-        cmp_str_natural, ensure_within, normalize_display_path, normalize_relative_path,
+        cmp_str_natural, ensure_within, hidden_std_command, normalize_display_path,
+        normalize_relative_path,
     },
 };
 
@@ -928,7 +928,7 @@ fn dataset_preview_is_fresh(source_path: &Path, preview_path: &Path) -> AppResul
 }
 
 fn render_dataset_preview_with_ffmpeg(source_path: &Path, preview_path: &Path) -> AppResult<()> {
-    let status = Command::new("ffmpeg")
+    let status = hidden_std_command("ffmpeg")
         .arg("-hide_banner")
         .arg("-loglevel")
         .arg("error")

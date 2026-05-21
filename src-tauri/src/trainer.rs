@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsStr,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -34,6 +35,28 @@ const STRUCTURED_LOG_PREFIX: &str = "@@LORA_FORGE_LOG@@";
 const STRUCTURED_LOG_SCHEMA: &str = "lora-forge.training.log/v1";
 const ABORT_GRACE_PERIOD: Duration = Duration::from_secs(3);
 const ABORT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// Shell-like single line for logs (quote args that contain whitespace).
+fn format_training_invocation(cmd: &tokio::process::Command) -> String {
+    fn fmt_arg(arg: &OsStr) -> String {
+        let s = arg.to_string_lossy();
+        if s.is_empty() {
+            return "\"\"".to_string();
+        }
+        if s.chars().any(|c| c.is_whitespace()) || s.contains('"') {
+            format!("\"{}\"", s.replace('"', "\\\""))
+        } else {
+            s.into_owned()
+        }
+    }
+    let std_cmd = cmd.as_std();
+    let mut out = fmt_arg(std_cmd.get_program());
+    for arg in std_cmd.get_args() {
+        out.push(' ');
+        out.push_str(&fmt_arg(arg));
+    }
+    out
+}
 
 fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
     let mut cmd = tokio::process::Command::new(program);
@@ -145,6 +168,7 @@ pub async fn start_training(
 
     let (mut command, control_mode) =
         build_training_command(&state, &project, &config, &env_settings, &job_id)?;
+    let command_line = format_training_invocation(&command);
     command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -164,11 +188,17 @@ pub async fn start_training(
     state.with_db(|connection| {
         db::create_job(connection, &job_id, &project.id, pid, JobStatus::Running)?;
         db::update_project_status(connection, &project.id, ProjectStatus::Running)?;
+        let by_steps = config.training_length_mode.eq_ignore_ascii_case("steps");
+        let (step_total_init, epoch_total_init) = if by_steps {
+            (config.max_train_steps, 1)
+        } else {
+            (0, config.epochs.max(1))
+        };
         let initial_snapshot = TrainingSnapshot {
             epoch: 1,
-            epoch_total: config.epochs,
+            epoch_total: epoch_total_init,
             step: 0,
-            step_total: config.epochs.saturating_mul(config.steps_per_epoch),
+            step_total: step_total_init,
             loss: 0.185,
             lr: parse_lr(&config.base_lr),
             runtime_seconds: 0,
@@ -187,6 +217,21 @@ pub async fn start_training(
             Some("bootstrap"),
             Some("TRAINER_BOOTSTRAP"),
             Some("Bootstrapping trainer process..."),
+            None,
+            None,
+        )?;
+        let cmd_log = format!("Training command: {command_line}");
+        db::append_log(
+            connection,
+            &job_id,
+            "stdout",
+            "info",
+            &cmd_log,
+            now_ts(),
+            Some("lifecycle"),
+            Some("bootstrap"),
+            Some("TRAINER_COMMAND"),
+            Some(&cmd_log),
             None,
             None,
         )?;
@@ -334,7 +379,7 @@ fn build_training_command(
         None
     };
 
-    let max_train_steps = config.epochs.saturating_mul(config.steps_per_epoch).max(1);
+    // `training_length_mode`: steps → `--max_train_steps`, epochs → `--max_train_epochs` (mutually exclusive).
     let resolution = parse_resolution(&config.resolution)?;
     let is_anima = config.training_script.trim() == "anima_train_network.py";
     let network_module = if is_anima {
@@ -375,9 +420,17 @@ fn build_training_command(
         .arg("--network_alpha")
         .arg(config.network_alpha.to_string())
         .arg("--train_batch_size")
-        .arg(config.batch_size.to_string())
-        .arg("--max_train_steps")
-        .arg(max_train_steps.to_string())
+        .arg(config.batch_size.to_string());
+    if config.training_length_mode.eq_ignore_ascii_case("steps") {
+        command
+            .arg("--max_train_steps")
+            .arg(config.max_train_steps.to_string());
+    } else {
+        command
+            .arg("--max_train_epochs")
+            .arg(config.epochs.to_string());
+    }
+    command
         .arg("--save_every_n_epochs")
         .arg(config.save_every_n_epochs.to_string())
         .arg("--learning_rate")
@@ -1682,10 +1735,12 @@ fn run_mock_trainer(args: &[String]) -> AppResult<()> {
     let control_file = PathBuf::from(required_arg(args, "--control-file")?);
     let epochs = required_arg(args, "--epochs")?
         .parse::<u32>()
-        .map_err(|_| AppError::Process("Invalid epochs value".to_string()))?;
-    let steps_per_epoch = required_arg(args, "--steps-per-epoch")?
+        .map_err(|_| AppError::Process("Invalid epochs value".to_string()))?
+        .max(1);
+    let max_train_steps = required_arg(args, "--max-train-steps")?
         .parse::<u32>()
-        .map_err(|_| AppError::Process("Invalid steps-per-epoch value".to_string()))?;
+        .map_err(|_| AppError::Process("Invalid max-train-steps value".to_string()))?
+        .max(1);
     let save_every = required_arg(args, "--save-every")?
         .parse::<u32>()
         .map_err(|_| AppError::Process("Invalid save-every value".to_string()))?;
@@ -1697,68 +1752,81 @@ fn run_mock_trainer(args: &[String]) -> AppResult<()> {
 
     println!("INFO project={} trainer=boot", project_name);
 
-    let total_steps = epochs.saturating_mul(steps_per_epoch).max(1);
-    let mut step = 0_u32;
+    let total_steps = max_train_steps;
+    let mut prev_epoch = 0_u32;
     let mut runtime_seconds = 0_u64;
 
-    for epoch in 1..=epochs {
-        for epoch_step in 1..=steps_per_epoch {
-            loop {
-                let control =
-                    read_control_state(&control_file).unwrap_or_else(|_| "running".to_string());
-                match control.as_str() {
-                    "paused" => {
-                        println!(
-                            "INFO project={} status=paused epoch={}/{} step={}/{}",
-                            project_name, epoch, epochs, step, total_steps
-                        );
-                        std::thread::sleep(Duration::from_millis(400));
-                        runtime_seconds = runtime_seconds.saturating_add(1);
-                        continue;
-                    }
-                    "aborted" => {
-                        println!("WARN project={} trainer=aborted", project_name);
-                        return Ok(());
-                    }
-                    _ => {}
-                }
-                break;
-            }
-
-            step = step.saturating_add(1);
-            runtime_seconds = runtime_seconds.saturating_add(1);
-
-            let progress = step as f64 / total_steps as f64;
-            let loss = (0.19 - progress * 0.13).max(0.028);
-            println!(
-                "TRAIN epoch={}/{} step={}/{} loss={:.4} lr={} runtime={}",
-                epoch, epochs, step, total_steps, loss, learning_rate, runtime_seconds
-            );
-
-            if epoch_step % 30 == 0 {
-                eprintln!(
-                    "WARN project={} note=Disk cache warming epoch_step={}",
-                    project_name, epoch_step
-                );
-            }
-
-            std::thread::sleep(Duration::from_millis(150));
-        }
-
-        if epoch % save_every.max(1) == 0 {
-            let checkpoint_path = output_dir.join(format!("epoch_{epoch:02}.safetensors"));
+    let write_checkpoint = |completed_epoch: u32| -> AppResult<()> {
+            let checkpoint_path =
+                output_dir.join(format!("epoch_{completed_epoch:02}.safetensors"));
             let mut checkpoint = fs::File::create(&checkpoint_path)?;
             writeln!(
                 checkpoint,
                 "mock checkpoint for {} at epoch {}",
-                project_name, epoch
+                project_name, completed_epoch
             )?;
             println!(
                 "CHECKPOINT epoch={} file={}",
-                epoch,
+                completed_epoch,
                 checkpoint_path.display()
             );
+            Ok(())
+        };
+
+    for step in 1..=total_steps {
+        let epoch = 1_u32.saturating_add(
+            (((step.saturating_sub(1)) as u64 * epochs as u64) / total_steps as u64) as u32,
+        );
+        loop {
+            let control =
+                read_control_state(&control_file).unwrap_or_else(|_| "running".to_string());
+            match control.as_str() {
+                "paused" => {
+                    println!(
+                        "INFO project={} status=paused epoch={}/{} step={}/{}",
+                        project_name, epoch, epochs, step, total_steps
+                    );
+                    std::thread::sleep(Duration::from_millis(400));
+                    runtime_seconds = runtime_seconds.saturating_add(1);
+                    continue;
+                }
+                "aborted" => {
+                    println!("WARN project={} trainer=aborted", project_name);
+                    return Ok(());
+                }
+                _ => {}
+            }
+            break;
         }
+
+        if epoch != prev_epoch {
+            if prev_epoch > 0 && prev_epoch % save_every.max(1) == 0 {
+                write_checkpoint(prev_epoch)?;
+            }
+            prev_epoch = epoch;
+        }
+
+        runtime_seconds = runtime_seconds.saturating_add(1);
+
+        let progress = step as f64 / total_steps as f64;
+        let loss = (0.19 - progress * 0.13).max(0.028);
+        println!(
+            "TRAIN epoch={}/{} step={}/{} loss={:.4} lr={} runtime={}",
+            epoch, epochs, step, total_steps, loss, learning_rate, runtime_seconds
+        );
+
+        if step % 30 == 0 {
+            eprintln!(
+                "WARN project={} note=Disk cache warming step={}",
+                project_name, step
+            );
+        }
+
+        std::thread::sleep(Duration::from_millis(150));
+    }
+
+    if prev_epoch > 0 && prev_epoch % save_every.max(1) == 0 {
+        write_checkpoint(prev_epoch)?;
     }
 
     println!("COMPLETE project={} status=completed", project_name);

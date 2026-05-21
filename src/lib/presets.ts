@@ -17,6 +17,8 @@ export interface TrainingPreset {
 // ─── shared base layers ──────────────────────────────────────────────────────
 
 const COMMON_BASE: Partial<TrainingConfig> = {
+  trainingLengthMode: "steps",
+  maxTrainSteps: 4000,
   optimizer: "AdamW8bit",
   optimizerArgs: "",
   lrScheduler: "cosine_with_restarts",
@@ -55,7 +57,7 @@ const SD15_BASE: Partial<TrainingConfig> = {
   resolution: "512x512",
   batchSize: 4,
   epochs: 16,
-  stepsPerEpoch: 250,
+  maxTrainSteps: 16 * 250,
   xformers: true,
   minBucketReso: 256,
   maxBucketReso: 768,
@@ -71,7 +73,7 @@ const SDXL_BASE: Partial<TrainingConfig> = {
   resolution: "1024x1024",
   batchSize: 1,
   epochs: 16,
-  stepsPerEpoch: 250,
+  maxTrainSteps: 16 * 250,
   lrWarmupSteps: 50,
   xformers: false,
   minBucketReso: 512,
@@ -84,11 +86,12 @@ const SDXL_BASE: Partial<TrainingConfig> = {
 
 const ANIMA_BASE: Partial<TrainingConfig> = {
   ...COMMON_BASE,
+  trainingLengthMode: "epochs",
   trainingScript: "anima_train_network.py",
   resolution: "1024x1024",
   batchSize: 1,
   epochs: 14,
-  stepsPerEpoch: 250,
+  maxTrainSteps: 14 * 250,
   xformers: false,
   minBucketReso: 512,
   maxBucketReso: 2048,
@@ -136,7 +139,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
       ...SD15_BASE,
       batchSize: 2,
       epochs: 24,
-      stepsPerEpoch: 160,
+      maxTrainSteps: 24 * 160,
       networkDim: 96,
       networkAlpha: 64,
       baseLr: "8e-5",
@@ -159,7 +162,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SD15_BASE,
       epochs: 14,
-      stepsPerEpoch: 300,
+      maxTrainSteps: 14 * 300,
       networkDim: 64,
       networkAlpha: 32,
       baseLr: "8e-5",
@@ -183,7 +186,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SD15_BASE,
       epochs: 16,
-      stepsPerEpoch: 260,
+      maxTrainSteps: 16 * 260,
       networkDim: 64,
       networkAlpha: 64,
       baseLr: "1e-4",
@@ -205,7 +208,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SD15_BASE,
       epochs: 10,
-      stepsPerEpoch: 300,
+      maxTrainSteps: 10 * 300,
       networkDim: 32,
       networkAlpha: 16,
       baseLr: "5e-5",
@@ -232,7 +235,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SDXL_BASE,
       epochs: 18,
-      stepsPerEpoch: 240,
+      maxTrainSteps: 18 * 240,
       networkDim: 64,
       networkAlpha: 32,
       baseLr: "8e-5",
@@ -254,7 +257,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SDXL_BASE,
       epochs: 14,
-      stepsPerEpoch: 280,
+      maxTrainSteps: 14 * 280,
       networkDim: 32,
       networkAlpha: 16,
       baseLr: "6e-5",
@@ -278,7 +281,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SDXL_BASE,
       epochs: 16,
-      stepsPerEpoch: 250,
+      maxTrainSteps: 16 * 250,
       networkDim: 64,
       networkAlpha: 32,
       baseLr: "7e-5",
@@ -300,7 +303,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...SDXL_BASE,
       epochs: 10,
-      stepsPerEpoch: 300,
+      maxTrainSteps: 10 * 300,
       networkDim: 16,
       networkAlpha: 8,
       baseLr: "4e-5",
@@ -326,7 +329,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...ANIMA_BASE,
       epochs: 16,
-      stepsPerEpoch: 240,
+      maxTrainSteps: 16 * 240,
       networkDim: 32,
       networkAlpha: 16,
       baseLr: "2e-5",
@@ -348,7 +351,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...ANIMA_BASE,
       epochs: 14,
-      stepsPerEpoch: 280,
+      maxTrainSteps: 14 * 280,
       networkDim: 32,
       networkAlpha: 16,
       baseLr: "2e-5",
@@ -373,7 +376,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...ANIMA_BASE,
       epochs: 15,
-      stepsPerEpoch: 250,
+      maxTrainSteps: 15 * 250,
       networkDim: 24,
       networkAlpha: 12,
       baseLr: "1.5e-5",
@@ -395,7 +398,7 @@ export const DEFAULT_PRESETS: TrainingPreset[] = [
     params: {
       ...ANIMA_BASE,
       epochs: 10,
-      stepsPerEpoch: 300,
+      maxTrainSteps: 10 * 300,
       networkDim: 8,
       networkAlpha: 4,
       baseLr: "8e-6",
@@ -421,6 +424,28 @@ export const PRESET_GROUPS: Array<{ label: string; labelZh: string; scriptMatch:
  * Built-in presets do not specify path keys, so unchanged fields (including paths) carry over from `current`.
  * Custom presets embed a full snapshot, so applying them also restores saved model/VAE/Qwen/network/resume paths.
  */
+/** Built-in training presets aimed at style / artist LoRA (not character identity). */
+export const STYLE_ARTIST_PRESET_IDS = [
+  "sd15-style-artist",
+  "sdxl-style-artist",
+  "anima-style-artist",
+] as const;
+
+export function isStyleArtistPresetId(id: string): boolean {
+  return (STYLE_ARTIST_PRESET_IDS as readonly string[]).includes(id);
+}
+
+/** Heuristic when the project config matches style-preset hallmarks (frozen text encoder, tag dropout). */
+export function looksLikeStyleArtistTrainingConfig(config: TrainingConfig): boolean {
+  const tagDrop = Number.parseFloat(config.captionTagDropoutRate);
+  return (
+    config.textEncoderLr === "0" &&
+    config.keepTokens === 0 &&
+    Number.isFinite(tagDrop) &&
+    tagDrop >= 0.1
+  );
+}
+
 export function applyPreset(
   current: TrainingConfig,
   preset: TrainingPreset,

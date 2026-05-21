@@ -2,6 +2,8 @@ import { Activity, Cpu, Key, type LucideIcon } from "lucide-react";
 import enDefaultSystemPrompt from "../../../prompts/system-prompt.en.md?raw";
 import zhCnDefaultSystemPrompt from "../../../prompts/system-prompt.zh-CN.md?raw";
 import animeSdPromptGenSystemPrompt from "../../../prompts/system-prompt-anime-sd-prompt-gen.md?raw";
+import enStyleLoraSystemPrompt from "../../../prompts/system-prompt-style-lora.en.md?raw";
+import zhCnStyleLoraSystemPrompt from "../../../prompts/system-prompt-style-lora.zh-CN.md?raw";
 import type { SupportedLanguage } from "../../lib/i18n";
 import type { LlmSettings } from "../../lib/types";
 
@@ -15,6 +17,11 @@ export const DEFAULT_LLM_CAPTION_RETRY_MAX = 3;
 const DEFAULT_SYSTEM_PROMPTS: Record<SupportedLanguage, string> = {
   en: enDefaultSystemPrompt.trim(),
   "zh-CN": zhCnDefaultSystemPrompt.trim(),
+};
+
+const STYLE_LORA_SYSTEM_PROMPTS: Record<SupportedLanguage, string> = {
+  en: enStyleLoraSystemPrompt.trim(),
+  "zh-CN": zhCnStyleLoraSystemPrompt.trim(),
 };
 
 const ANIME_SD_PROMPT_GEN_BUILTIN = animeSdPromptGenSystemPrompt.trim();
@@ -75,6 +82,9 @@ export const BUILTIN_PROMPT_ZH_CN = "__builtin_zh_cn__";
 /** 固定 Anime / SD 提示词生成助手（tag + 自然语言，`system-prompt-anime-sd-prompt-gen.md`）。 */
 export const BUILTIN_PROMPT_ANIME_SD = "__builtin_anime_sd_prompt_gen__";
 
+/** 画风 / 画师 LoRA 打标（仅逗号 tag，禁止风格/媒介词，`system-prompt-style-lora.*.md`）。 */
+export const BUILTIN_PROMPT_STYLE_LORA = "__builtin_style_lora__";
+
 /** User edited the textarea; selection no longer matches a preset row. */
 export const LLM_PROMPT_AD_HOC = "__ad_hoc__";
 
@@ -100,6 +110,8 @@ export function applyBuiltinPromptSelection(
       return DEFAULT_SYSTEM_PROMPTS["zh-CN"];
     case BUILTIN_PROMPT_ANIME_SD:
       return ANIME_SD_PROMPT_GEN_BUILTIN;
+    case BUILTIN_PROMPT_STYLE_LORA:
+      return STYLE_LORA_SYSTEM_PROMPTS[language];
     default:
       return null;
   }
@@ -123,6 +135,12 @@ export function inferLlmPromptPresetSelection(
   const animeB = ANIME_SD_PROMPT_GEN_BUILTIN;
   if (t === animeB) {
     return BUILTIN_PROMPT_ANIME_SD;
+  }
+
+  const styleEn = STYLE_LORA_SYSTEM_PROMPTS.en.trim();
+  const styleZh = STYLE_LORA_SYSTEM_PROMPTS["zh-CN"].trim();
+  if (t === styleEn || t === styleZh) {
+    return BUILTIN_PROMPT_STYLE_LORA;
   }
 
   const enD = DEFAULT_SYSTEM_PROMPTS.en.trim();

@@ -38,7 +38,7 @@ use crate::{
 };
 
 const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system-prompt.en.md");
-const AUTO_TAG_PROMPT: &str = "Generate a concise, training-ready caption for this image for a Stable Diffusion or LoRA dataset. Return only a comma-separated caption with no preamble. Include subject, appearance, clothing, pose, framing, environment, lighting, and style cues when visible. Keep it factual and useful for image training.";
+const AUTO_TAG_PROMPT: &str = "Generate a concise, training-ready caption for this image for a Stable Diffusion or LoRA dataset. Return only a comma-separated Danbooru-style tag list with no preamble and no full sentences. Include subject, appearance, clothing, pose, framing, environment, and scene lighting when visible. Do NOT include art-style or medium tags (anime, realistic, sketch, cel_shading, monochrome, illustration, etc.), quality tags (masterpiece, best_quality, score_*), or artist names — the LoRA learns rendering from pixels. Keep it factual.";
 /// Keeps multimodal payloads small; omit prior turn if exceeding this character count after trim.
 const MAX_PREVIOUS_ASSISTANT_CHARS: usize = 12_000;
 /// 用于日志截断（避免在 stderr / api log 里写出整张图的 base64）。

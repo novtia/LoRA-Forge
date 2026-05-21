@@ -9,13 +9,7 @@ use serde::Deserialize;
 use crate::{error::AppResult, models::HardwareInfo, utils::now_ts};
 
 fn hidden_command(program: &str) -> Command {
-    let mut cmd = Command::new(program);
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
-    cmd
+    crate::utils::hidden_std_command(program)
 }
 
 #[derive(Debug, Clone)]

@@ -1,10 +1,13 @@
 use rusqlite::{params, Connection, OptionalExtension};
 
+use std::collections::HashMap;
+
 use crate::{
     error::{AppError, AppResult},
     models::{
-        ActiveJobSummary, BaiduTranslateSettings, JobStatus, LlmSettings, LossPoint, ProjectRecord,
-        ProjectStatus, TrainingConfig, TrainingEnvSettings, TrainingLogLine, TrainingSnapshot,
+        ActiveJobSummary, BaiduTranslateSettings, DiffusionPipeConfig, JobStatus, LlmSettings,
+        LossPoint, ProjectRecord, ProjectStatus, TrainingConfig, TrainingEnvSettings,
+        TrainingLogLine, TrainingSnapshot,
     },
     utils::{normalize_display_path_string, now_ts},
 };
@@ -32,6 +35,13 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
             updated_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS diffusion_pipe_configs (
+            project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+            config_json TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS training_env_settings (
             id TEXT PRIMARY KEY,
             config_json TEXT NOT NULL,
@@ -51,6 +61,13 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
             config_json TEXT NOT NULL,
             version INTEGER NOT NULL DEFAULT 1,
             updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS dataset_group_configs (
+            project_id TEXT NOT NULL,
+            group_path TEXT NOT NULL,
+            group_type TEXT NOT NULL DEFAULT 'normal',
+            PRIMARY KEY (project_id, group_path)
         );
 
         CREATE TABLE IF NOT EXISTS jobs (
@@ -268,6 +285,140 @@ pub fn load_training_config(
         Some(config_json) => Ok(serde_json::from_str(&config_json)?),
         None => Ok(TrainingConfig::default()),
     }
+}
+
+pub fn save_diffusion_pipe_config(
+    connection: &Connection,
+    project_id: &str,
+    config: &DiffusionPipeConfig,
+) -> AppResult<()> {
+    let config_json = serde_json::to_string(config)?;
+    connection.execute(
+        "
+        INSERT INTO diffusion_pipe_configs (project_id, config_json, version, updated_at)
+        VALUES (?1, ?2, 1, ?3)
+        ON CONFLICT(project_id) DO UPDATE SET
+            config_json = excluded.config_json,
+            version = diffusion_pipe_configs.version + 1,
+            updated_at = excluded.updated_at
+        ",
+        params![project_id, config_json, now_ts()],
+    )?;
+    Ok(())
+}
+
+pub fn load_diffusion_pipe_config(
+    connection: &Connection,
+    project_id: &str,
+) -> AppResult<DiffusionPipeConfig> {
+    let maybe_json = connection
+        .query_row(
+            "SELECT config_json FROM diffusion_pipe_configs WHERE project_id = ?1",
+            params![project_id],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+
+    match maybe_json {
+        Some(config_json) => Ok(serde_json::from_str(&config_json)?),
+        None => Ok(DiffusionPipeConfig::default()),
+    }
+}
+
+// ── dataset group configs ──────────────────────────────────────────────────
+
+/// Upsert the type ("normal" | "reg") for a dataset directory group.
+pub fn save_dataset_group_type(
+    connection: &Connection,
+    project_id: &str,
+    group_path: &str,
+    group_type: &str,
+) -> AppResult<()> {
+    if group_type == "normal" {
+        // "normal" is the default → just delete any existing row so we stay clean
+        connection.execute(
+            "DELETE FROM dataset_group_configs WHERE project_id = ?1 AND group_path = ?2",
+            params![project_id, group_path],
+        )?;
+    } else {
+        connection.execute(
+            "INSERT INTO dataset_group_configs (project_id, group_path, group_type)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(project_id, group_path) DO UPDATE SET group_type = excluded.group_type",
+            params![project_id, group_path, group_type],
+        )?;
+    }
+    Ok(())
+}
+
+/// Returns a map of group_path → group_type for all non-normal groups in a project.
+pub fn load_dataset_group_types(
+    connection: &Connection,
+    project_id: &str,
+) -> AppResult<HashMap<String, String>> {
+    let mut stmt = connection.prepare(
+        "SELECT group_path, group_type FROM dataset_group_configs WHERE project_id = ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![project_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Update group_path (and all sub-paths) when a group is renamed.
+pub fn rename_dataset_group_config(
+    connection: &Connection,
+    project_id: &str,
+    old_path: &str,
+    new_path: &str,
+) -> AppResult<()> {
+    let old_prefix = format!("{}/", old_path);
+    let new_prefix = format!("{}/", new_path);
+    // exact match
+    connection.execute(
+        "UPDATE dataset_group_configs SET group_path = ?3
+         WHERE project_id = ?1 AND group_path = ?2",
+        params![project_id, old_path, new_path],
+    )?;
+    // sub-paths: replace prefix
+    let mut stmt = connection.prepare(
+        "SELECT group_path FROM dataset_group_configs
+         WHERE project_id = ?1 AND group_path LIKE ?2 ESCAPE '\\'",
+    )?;
+    let like_pattern = format!("{}%", old_prefix.replace('%', "\\%").replace('_', "\\_"));
+    let sub_paths: Vec<String> = stmt
+        .query_map(params![project_id, like_pattern], |row| row.get(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    for sub in sub_paths {
+        let updated = format!("{}{}", new_prefix, &sub[old_prefix.len()..]);
+        connection.execute(
+            "UPDATE dataset_group_configs SET group_path = ?3
+             WHERE project_id = ?1 AND group_path = ?2",
+            params![project_id, sub, updated],
+        )?;
+    }
+    Ok(())
+}
+
+/// Remove group_path and all sub-paths when a group is deleted.
+pub fn remove_dataset_group_configs(
+    connection: &Connection,
+    project_id: &str,
+    group_path: &str,
+) -> AppResult<()> {
+    let like_pattern = format!(
+        "{}/{}",
+        group_path.replace('%', "\\%").replace('_', "\\_"),
+        "%"
+    );
+    connection.execute(
+        "DELETE FROM dataset_group_configs
+         WHERE project_id = ?1 AND (group_path = ?2 OR group_path LIKE ?3 ESCAPE '\\')",
+        params![project_id, group_path, like_pattern],
+    )?;
+    Ok(())
 }
 
 pub fn save_training_env(connection: &Connection, settings: &TrainingEnvSettings) -> AppResult<()> {

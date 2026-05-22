@@ -42,6 +42,10 @@ type Props = {
   setImageRange: (value: string) => void;
   busy: string | null;
   batchProgress: BatchProgress | null;
+  onlyUntagged: boolean;
+  setOnlyUntagged: (v: boolean) => void;
+  /** null = not yet computed; number = count of untagged images in current batch scope */
+  untaggedCount: number | null;
   apiLogLines: ApiLogEntry[];
   runBatchTagging: () => Promise<void>;
   refreshApiLogs: () => Promise<void>;
@@ -73,6 +77,9 @@ export function DatasetEditorPreviewCard({
   setImageRange,
   busy,
   batchProgress,
+  onlyUntagged,
+  setOnlyUntagged,
+  untaggedCount,
   apiLogLines,
   runBatchTagging,
   refreshApiLogs,
@@ -246,6 +253,45 @@ export function DatasetEditorPreviewCard({
                   }}
                 />
 
+                {/* Only-untagged toggle */}
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.5rem",
+                    cursor: busy !== null ? "default" : "pointer",
+                    fontSize: "0.8rem",
+                    color: onlyUntagged ? "var(--text-main)" : "var(--text-muted)",
+                    marginTop: "-0.5rem",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={onlyUntagged}
+                    disabled={busy !== null}
+                    onChange={(e) => setOnlyUntagged(e.target.checked)}
+                    style={{ accentColor: "var(--accent-acid)", width: "0.9rem", height: "0.9rem", flexShrink: 0 }}
+                  />
+                  {t("dataset.onlyUntagged")}
+                  {onlyUntagged && untaggedCount !== null ? (
+                    <span
+                      style={{
+                        marginLeft: "0.25rem",
+                        padding: "0.05rem 0.35rem",
+                        borderRadius: "3px",
+                        fontSize: "0.7rem",
+                        fontFamily: "var(--font-mono)",
+                        background: untaggedCount === 0
+                          ? "color-mix(in srgb, var(--text-muted) 18%, transparent)"
+                          : "color-mix(in srgb, var(--accent-acid) 18%, transparent)",
+                        color: untaggedCount === 0 ? "var(--text-muted)" : "var(--accent-acid)",
+                      }}
+                    >
+                      {t("dataset.untaggedCount", { count: untaggedCount })}
+                    </span>
+                  ) : null}
+                </label>
+
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                   <label className="form-label">{t("dataset.taggingMode")}</label>
                   <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
@@ -322,9 +368,17 @@ export function DatasetEditorPreviewCard({
                     fontSize: "0.75rem",
                     color: "var(--text-muted)",
                     marginTop: taggingMode === "range" ? 0 : "-0.5rem",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "0.2rem",
                   }}
                 >
-                  {t("dataset.totalImagesInScope", { total: batchTaggingTargetCount })}
+                  <span>{t("dataset.totalImagesInScope", { total: batchTaggingTargetCount })}</span>
+                  {onlyUntagged && untaggedCount !== null && (
+                    <span style={{ color: untaggedCount === 0 ? "var(--text-muted)" : "var(--accent-acid)" }}>
+                      {t("dataset.untaggedInScope", { count: untaggedCount, total: batchTaggingTargetCount })}
+                    </span>
+                  )}
                 </div>
 
                 {batchProgress ? (
@@ -376,7 +430,11 @@ export function DatasetEditorPreviewCard({
                     type="button"
                     className="btn btn-primary"
                     style={{ flex: 1, justifyContent: "center", padding: "0.75rem" }}
-                    disabled={batchTaggingTargetCount === 0 || busy !== null}
+                    disabled={
+                      batchTaggingTargetCount === 0 ||
+                      busy !== null ||
+                      (onlyUntagged && untaggedCount === 0)
+                    }
                     onClick={() => void runBatchTagging()}
                   >
                     <Bot size={18} style={{ marginRight: "0.5rem" }} />{" "}

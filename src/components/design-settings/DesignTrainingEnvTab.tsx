@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FolderOpen, TerminalSquare } from "lucide-react";
+import { FolderOpen, Cpu, TerminalSquare } from "lucide-react";
 import { loadTrainingEnv, saveTrainingEnv } from "../../lib/desktopApi";
 import type { TranslateFn } from "../../lib/i18n";
 import type { TrainingEnvSettings } from "../../lib/types";
@@ -12,6 +12,10 @@ export function DesignTrainingEnvTab({ t }: DesignTrainingEnvTabProps) {
   const [settings, setSettings] = useState<TrainingEnvSettings>({
     sdScriptsPath: "",
     pythonExecutable: "",
+    wslDistro: "Ubuntu",
+    diffusionPipeWslPath: "",
+    diffusionPipeVenvPath: "",
+    numGpus: 1,
   });
   const [busyState, setBusyState] = useState<"loading" | "saving" | null>("loading");
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -124,6 +128,108 @@ export function DesignTrainingEnvTab({ t }: DesignTrainingEnvTabProps) {
         >
           <TerminalSquare size={14} />
           {t("config.runtimeHint")}
+        </div>
+
+        {/* diffusion-pipe section */}
+        <div
+          style={{
+            borderTop: "1px solid var(--border)",
+            paddingTop: "1.25rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: "1.25rem",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+              fontSize: "0.8rem",
+              color: "var(--text-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.05em",
+            }}
+          >
+            <Cpu size={14} />
+            diffusion-pipe (WSL)
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              <TerminalSquare
+                size={14}
+                style={{ marginRight: "0.5rem", display: "inline-block", verticalAlign: "middle" }}
+              />
+              WSL 发行版名称
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Ubuntu"
+              value={settings.wslDistro}
+              onChange={(event) => updateSetting("wslDistro", event.target.value)}
+              disabled={busyState === "loading"}
+            />
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+              运行 <code>wsl -l</code> 查看可用发行版，默认 Ubuntu
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              <FolderOpen
+                size={14}
+                style={{ marginRight: "0.5rem", display: "inline-block", verticalAlign: "middle" }}
+              />
+              diffusion-pipe WSL 路径
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="/mnt/d/anima/diffusion-pipe"
+              value={settings.diffusionPipeWslPath}
+              onChange={(event) => updateSetting("diffusionPipeWslPath", event.target.value)}
+              disabled={busyState === "loading"}
+            />
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+              diffusion-pipe 仓库在 WSL 内的路径，如 /mnt/d/anima/diffusion-pipe
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">
+              <FolderOpen
+                size={14}
+                style={{ marginRight: "0.5rem", display: "inline-block", verticalAlign: "middle" }}
+              />
+              Python 虚拟环境路径（WSL）
+            </label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="/mnt/d/anima/diffusion-pipe/.venv"
+              value={settings.diffusionPipeVenvPath}
+              onChange={(event) => updateSetting("diffusionPipeVenvPath", event.target.value)}
+              disabled={busyState === "loading"}
+            />
+            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
+              留空则不激活虚拟环境（使用系统 Python）
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">GPU 数量 (--num_gpus)</label>
+            <input
+              type="number"
+              className="form-input"
+              min={1}
+              style={{ maxWidth: "120px" }}
+              value={settings.numGpus}
+              onChange={(event) => updateSetting("numGpus", Number(event.target.value))}
+              disabled={busyState === "loading"}
+            />
+          </div>
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "0.5rem" }}>

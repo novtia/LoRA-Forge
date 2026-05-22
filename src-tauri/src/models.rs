@@ -195,6 +195,142 @@ pub struct TrainingConfig {
 pub struct TrainingEnvSettings {
     pub sd_scripts_path: String,
     pub python_executable: String,
+    #[serde(default = "default_wsl_distro")]
+    pub wsl_distro: String,
+    pub diffusion_pipe_wsl_path: String,
+    pub diffusion_pipe_venv_path: String,
+    #[serde(default = "default_num_gpus")]
+    pub num_gpus: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DiffusionPipeConfig {
+    pub model_type: String,
+    pub model_path: String,
+    pub transformer_path: String,
+    pub vae_path: String,
+    pub llm_path: String,
+    pub clip_path: String,
+    pub model_dtype: String,
+    pub transformer_dtype: String,
+    pub timestep_sample_method: String,
+    pub adapter_type: String,
+    #[serde(default = "default_lora_rank")]
+    pub lora_rank: u32,
+    pub lora_dtype: String,
+    pub optimizer_type: String,
+    pub lr: String,
+    pub weight_decay: String,
+    #[serde(default = "default_dp_epochs")]
+    pub epochs: u32,
+    pub max_steps: u32,
+    #[serde(default = "default_u32_one")]
+    pub micro_batch_size_per_gpu: u32,
+    #[serde(default = "default_u32_one")]
+    pub gradient_accumulation_steps: u32,
+    pub gradient_clipping: String,
+    #[serde(default = "default_warmup_steps")]
+    pub warmup_steps: u32,
+    pub activation_checkpointing: String,
+    pub blocks_to_swap: u32,
+    pub save_dtype: String,
+    #[serde(default = "default_save_every_n_epochs")]
+    pub save_every_n_epochs: u32,
+    pub save_every_n_steps: u32,
+    #[serde(default = "default_u32_one")]
+    pub eval_every_n_epochs: u32,
+    #[serde(default = "default_checkpoint_minutes")]
+    pub checkpoint_every_n_minutes: u32,
+    pub dataset_resolutions: String,
+    pub enable_ar_bucket: bool,
+    #[serde(default = "default_num_ar_buckets")]
+    pub num_ar_buckets: u32,
+    pub frame_buckets: String,
+    #[serde(default = "default_u32_one")]
+    pub num_repeats: u32,
+    pub resume_from_checkpoint: String,
+    pub nccl_disable: bool,
+    pub steps_per_print: u32,
+}
+
+impl Default for DiffusionPipeConfig {
+    fn default() -> Self {
+        Self {
+            model_type: "hunyuan-video".to_string(),
+            model_path: String::new(),
+            transformer_path: String::new(),
+            vae_path: String::new(),
+            llm_path: String::new(),
+            clip_path: String::new(),
+            model_dtype: "bfloat16".to_string(),
+            transformer_dtype: "float8".to_string(),
+            timestep_sample_method: "logit_normal".to_string(),
+            adapter_type: "lora".to_string(),
+            lora_rank: 32,
+            lora_dtype: "bfloat16".to_string(),
+            optimizer_type: "adamw_optimi".to_string(),
+            lr: "2e-5".to_string(),
+            weight_decay: "0.01".to_string(),
+            epochs: 1000,
+            max_steps: 0,
+            micro_batch_size_per_gpu: 1,
+            gradient_accumulation_steps: 1,
+            gradient_clipping: "1.0".to_string(),
+            warmup_steps: 100,
+            activation_checkpointing: "true".to_string(),
+            blocks_to_swap: 0,
+            save_dtype: "bfloat16".to_string(),
+            save_every_n_epochs: 5,
+            save_every_n_steps: 0,
+            eval_every_n_epochs: 1,
+            checkpoint_every_n_minutes: 120,
+            dataset_resolutions: "512".to_string(),
+            enable_ar_bucket: true,
+            num_ar_buckets: 7,
+            frame_buckets: "1,33".to_string(),
+            num_repeats: 1,
+            resume_from_checkpoint: String::new(),
+            nccl_disable: true,
+            steps_per_print: 1,
+        }
+    }
+}
+
+fn default_wsl_distro() -> String {
+    "Ubuntu".to_string()
+}
+
+fn default_num_gpus() -> u32 {
+    1
+}
+
+fn default_lora_rank() -> u32 {
+    32
+}
+
+fn default_dp_epochs() -> u32 {
+    1000
+}
+
+fn default_u32_one() -> u32 {
+    1
+}
+
+fn default_warmup_steps() -> u32 {
+    100
+}
+
+fn default_save_every_n_epochs() -> u32 {
+    5
+}
+
+fn default_checkpoint_minutes() -> u32 {
+    120
+}
+
+fn default_num_ar_buckets() -> u32 {
+    7
 }
 
 fn default_caption_retry_max() -> u32 {
@@ -356,6 +492,10 @@ impl Default for TrainingEnvSettings {
         Self {
             sd_scripts_path: default_sd_scripts_path(),
             python_executable: String::new(),
+            wsl_distro: default_wsl_distro(),
+            diffusion_pipe_wsl_path: String::new(),
+            diffusion_pipe_venv_path: String::new(),
+            num_gpus: default_num_gpus(),
         }
     }
 }
@@ -817,6 +957,25 @@ pub enum DatasetEntryKind {
     File,
 }
 
+/// Logical role of a directory group in the dataset.
+/// `Normal` = regular training images; `Reg` = regularization images (`is_reg = true` in sd-scripts).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DatasetGroupType {
+    #[default]
+    Normal,
+    Reg,
+}
+
+impl DatasetGroupType {
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "reg" => Self::Reg,
+            _ => Self::Normal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatasetEntry {
@@ -824,6 +983,9 @@ pub struct DatasetEntry {
     pub name: String,
     pub kind: DatasetEntryKind,
     pub depth: u32,
+    /// Present only for `Directory` kind entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_type: Option<DatasetGroupType>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

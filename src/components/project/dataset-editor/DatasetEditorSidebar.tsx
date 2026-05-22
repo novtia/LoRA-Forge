@@ -51,6 +51,8 @@ type Props = {
   selectedImagePaths: Set<string>;
   assetRelativePath: string | undefined;
   batchRangeHighlightPaths: Set<string> | null;
+  /** When non-null, image rows in this set are highlighted as untagged. */
+  untaggedImagePaths: Set<string> | null;
   batchProgress: BatchProgress | null;
   onToolbarCreateGroup: () => void;
   onExpandAll: () => void;
@@ -72,6 +74,7 @@ export function DatasetEditorSidebar({
   selectedImagePaths,
   assetRelativePath,
   batchRangeHighlightPaths,
+  untaggedImagePaths,
   batchProgress,
   onToolbarCreateGroup,
   onExpandAll,
@@ -110,7 +113,11 @@ export function DatasetEditorSidebar({
   };
 
   return (
-    <div className="card" style={{ gridColumn: "span 2", gridRow: "span 3", animationDelay: "0s" }}>
+    <div
+      className="card"
+      style={{ gridColumn: "span 2", gridRow: "span 3", animationDelay: "0s" }}
+      onContextMenu={(ev) => ev.preventDefault()}
+    >
       <div className="card-header" style={{ flexWrap: "wrap", gap: "0.4rem" }}>
         <span className="card-title-icon">
           <FolderTree size={18} /> {t("dataset.fileSystem")}
@@ -321,13 +328,30 @@ export function DatasetEditorSidebar({
                   <ChevronRight size={12} aria-hidden />
                 )}
                 {isExpanded ? (
-                  <FolderOpen size={14} aria-hidden />
+                  <FolderOpen size={14} aria-hidden style={node.entry?.groupType === "reg" ? { color: "var(--accent-orange)" } : undefined} />
                 ) : (
-                  <Folder size={14} aria-hidden />
+                  <Folder size={14} aria-hidden style={node.entry?.groupType === "reg" ? { color: "var(--accent-orange)" } : undefined} />
                 )}
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {node.name}/
                 </span>
+                {node.entry?.groupType === "reg" ? (
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      fontSize: "0.55rem",
+                      fontFamily: "var(--font-mono)",
+                      letterSpacing: "0.04em",
+                      padding: "0.05rem 0.3rem",
+                      borderRadius: "3px",
+                      background: "color-mix(in srgb, var(--accent-orange) 18%, transparent)",
+                      color: "var(--accent-orange)",
+                      border: "1px solid color-mix(in srgb, var(--accent-orange) 35%, transparent)",
+                    }}
+                  >
+                    REG
+                  </span>
+                ) : null}
               </div>
             );
           }
@@ -336,6 +360,8 @@ export function DatasetEditorSidebar({
           const inBatchRange =
             batchRangeHighlightPaths !== null &&
             batchRangeHighlightPaths.has(entry.relativePath);
+          const isUntagged =
+            untaggedImagePaths !== null && untaggedImagePaths.has(entry.relativePath);
           const isActive = entry.relativePath === assetRelativePath;
           const isMultiSelected = selectedImagePaths.has(entry.relativePath);
           const isBatchWorking =
@@ -380,21 +406,25 @@ export function DatasetEditorSidebar({
                 marginRight: "0.25rem",
                 borderRadius: "4px",
                 cursor: "pointer",
-                color: isActive || isMultiSelected ? "var(--text-main)" : undefined,
+                color: isActive || isMultiSelected || isUntagged ? "var(--text-main)" : undefined,
                 backgroundColor: isBatchWorking
                   ? "color-mix(in srgb, var(--accent-orange) 22%, transparent)"
                   : isMultiSelected
                     ? "color-mix(in srgb, var(--accent-acid) 24%, transparent)"
                     : inBatchRange
                       ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
-                      : undefined,
+                      : isUntagged
+                        ? "color-mix(in srgb, var(--accent-orange) 10%, transparent)"
+                        : undefined,
                 boxShadow: isBatchWorking
                   ? "inset 3px 0 0 var(--accent-orange)"
                   : isActive
                     ? "inset 3px 0 0 var(--accent-acid)"
                     : inBatchRange
                       ? "inset 3px 0 0 var(--accent-acid)"
-                      : undefined,
+                      : isUntagged
+                        ? "inset 3px 0 0 color-mix(in srgb, var(--accent-orange) 60%, transparent)"
+                        : undefined,
               }}
             >
               <Image size={13} />

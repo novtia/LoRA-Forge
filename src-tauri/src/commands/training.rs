@@ -10,7 +10,7 @@ use crate::{
     commands::respond,
     db,
     error::{AppError, AppResult},
-    models::{ActiveJobSummary, TrainingConfig},
+    models::{ActiveJobSummary, DiffusionPipeConfig, TrainingConfig},
     state::AppState,
     trainer,
     utils::{newest_file_with_extension, normalize_display_path},
@@ -55,6 +55,13 @@ fn trim_path_if_outside_project(project_root: &str, path_field: &mut String) -> 
 pub struct ExportCheckpointInput {
     pub project_id: String,
     pub destination_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveDiffusionPipeConfigInput {
+    pub project_id: String,
+    pub config: DiffusionPipeConfig,
 }
 
 #[tauri::command]
@@ -183,6 +190,55 @@ async fn start_training_inner(
     config.validate().map_err(AppError::Validation)?;
 
     trainer::start_training(app, state, project, config).await
+}
+
+#[tauri::command]
+pub fn load_diffusion_pipe_config(
+    project_id: String,
+    state: State<'_, AppState>,
+) -> Result<DiffusionPipeConfig, String> {
+    respond(state.with_db(|connection| db::load_diffusion_pipe_config(connection, &project_id)))
+}
+
+#[tauri::command]
+pub fn save_diffusion_pipe_config(
+    input: SaveDiffusionPipeConfigInput,
+    state: State<'_, AppState>,
+) -> Result<DiffusionPipeConfig, String> {
+    respond(save_diffusion_pipe_config_inner(state.inner().clone(), &input.project_id, input.config))
+}
+
+fn save_diffusion_pipe_config_inner(
+    state: AppState,
+    project_id: &str,
+    config: DiffusionPipeConfig,
+) -> AppResult<DiffusionPipeConfig> {
+    state.with_db(|connection| db::save_diffusion_pipe_config(connection, project_id, &config))?;
+    state.with_db(|connection| db::load_diffusion_pipe_config(connection, project_id))
+}
+
+#[tauri::command]
+pub async fn start_diffusion_pipe_training(
+    project_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ActiveJobSummary, String> {
+    respond(start_diffusion_pipe_training_inner(app, state.inner().clone(), &project_id).await)
+}
+
+async fn start_diffusion_pipe_training_inner(
+    app: AppHandle,
+    state: AppState,
+    project_id: &str,
+) -> AppResult<ActiveJobSummary> {
+    let (project, config) = state.with_db(|connection| {
+        Ok((
+            db::get_project(connection, project_id)?,
+            db::load_diffusion_pipe_config(connection, project_id)?,
+        ))
+    })?;
+
+    trainer::start_diffusion_pipe_training(app, state, project, config).await
 }
 
 fn export_checkpoint_inner(

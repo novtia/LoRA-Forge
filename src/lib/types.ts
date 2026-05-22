@@ -103,6 +103,49 @@ export interface TrainingConfig {
 export interface TrainingEnvSettings {
   sdScriptsPath: string;
   pythonExecutable: string;
+  wslDistro: string;
+  diffusionPipeWslPath: string;
+  diffusionPipeVenvPath: string;
+  numGpus: number;
+}
+
+export interface DiffusionPipeConfig {
+  modelType: string;
+  modelPath: string;
+  transformerPath: string;
+  vaePath: string;
+  llmPath: string;
+  clipPath: string;
+  modelDtype: string;
+  transformerDtype: string;
+  timestepSampleMethod: string;
+  adapterType: string;
+  loraRank: number;
+  loraDtype: string;
+  optimizerType: string;
+  lr: string;
+  weightDecay: string;
+  epochs: number;
+  maxSteps: number;
+  microBatchSizePerGpu: number;
+  gradientAccumulationSteps: number;
+  gradientClipping: string;
+  warmupSteps: number;
+  activationCheckpointing: string;
+  blocksToSwap: number;
+  saveDtype: string;
+  saveEveryNEpochs: number;
+  saveEveryNSteps: number;
+  evalEveryNEpochs: number;
+  checkpointEveryNMinutes: number;
+  datasetResolutions: string;
+  enableArBucket: boolean;
+  numArBuckets: number;
+  frameBuckets: string;
+  numRepeats: number;
+  resumeFromCheckpoint: string;
+  ncclDisable: boolean;
+  stepsPerPrint: number;
 }
 
 /**
@@ -253,11 +296,16 @@ export interface SystemStats {
 
 export type DatasetEntryKind = "directory" | "image" | "file";
 
+/** Logical role of a directory group. `"reg"` = regularization dataset (is_reg=true in sd-scripts). */
+export type DatasetGroupType = "normal" | "reg";
+
 export interface DatasetEntry {
   relativePath: string;
   name: string;
   kind: DatasetEntryKind;
   depth: number;
+  /** Only present for `"directory"` kind entries. Omitted when `"normal"` (default). */
+  groupType?: DatasetGroupType;
 }
 
 export interface DatasetAsset {

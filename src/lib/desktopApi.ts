@@ -7,6 +7,7 @@ import type {
   DatasetAsset,
   DatasetPreviewAsset,
   DatasetEntry,
+  DiffusionPipeConfig,
   LlmSettings,
   ProjectRecord,
   SampleImageEntry,
@@ -197,6 +198,26 @@ export function removeDatasetGroup(
   });
 }
 
+export function setDatasetGroupType(
+  projectId: string,
+  groupRelativePath: string,
+  groupType: "normal" | "reg",
+): Promise<DatasetEntry[]> {
+  return invoke("set_dataset_group_type", {
+    input: { projectId, groupRelativePath, groupType },
+  });
+}
+
+/** Returns the subset of `relativePaths` whose caption (.txt) is absent or empty. */
+export function listUntaggedImagePaths(
+  projectId: string,
+  relativePaths: string[],
+): Promise<string[]> {
+  return invoke("list_untagged_image_paths", {
+    input: { projectId, relativePaths },
+  });
+}
+
 export function autoTagImage(
   projectId: string,
   relativePath: string,
@@ -220,6 +241,23 @@ export function autoTagImage(
 
 export function cancelLlmCaption(): Promise<void> {
   return invoke("cancel_llm_caption");
+}
+
+export function loadDiffusionPipeConfig(projectId: string): Promise<DiffusionPipeConfig> {
+  return invoke("load_diffusion_pipe_config", { projectId });
+}
+
+export function saveDiffusionPipeConfig(
+  projectId: string,
+  config: DiffusionPipeConfig,
+): Promise<DiffusionPipeConfig> {
+  return invoke("save_diffusion_pipe_config", {
+    input: { projectId, config },
+  });
+}
+
+export function startDiffusionPipeTraining(projectId: string): Promise<ActiveJobSummary> {
+  return invoke("start_diffusion_pipe_training", { projectId });
 }
 
 export function startTraining(projectId: string): Promise<ActiveJobSummary> {

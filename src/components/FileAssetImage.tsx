@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from "react";
 import { Image as ImageIcon } from "lucide-react";
 import { toFileAssetUrl } from "../lib/desktopApi";
 
@@ -12,6 +12,7 @@ interface FileAssetImageProps {
   imageStyle?: CSSProperties;
   placeholderIconSize?: number;
   showOverlay?: boolean;
+  onClick?: (e: MouseEvent<HTMLDivElement>) => void;
 }
 
 export default function FileAssetImage({
@@ -24,6 +25,7 @@ export default function FileAssetImage({
   imageStyle,
   placeholderIconSize = 18,
   showOverlay = false,
+  onClick,
 }: FileAssetImageProps) {
   const [hasError, setHasError] = useState(false);
   const src = useMemo(() => (filePath ? toFileAssetUrl(filePath) : null), [filePath]);
@@ -38,10 +40,12 @@ export default function FileAssetImage({
     <div
       className={className}
       title={title}
+      onClick={onClick}
       style={{
         position: "relative",
         overflow: "hidden",
         background: "var(--bg-base)",
+        cursor: onClick ? "pointer" : undefined,
         ...style,
       }}
     >

@@ -29,6 +29,8 @@ export type DatasetEditorFormPersist = {
   batchTaggingGroupPath: string;
   imageRange: string;
   taggingMode: "all" | "range";
+  /** When true, batch tagging skips images that already have a non-empty caption. */
+  onlyUntagged: boolean;
   /** Vertical preview tool dock next to image (legacy key `showBatchPanel`). */
   previewDockOpen: boolean;
 };
@@ -72,6 +74,7 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
         typeof parsed.batchTaggingGroupPath === "string" ? parsed.batchTaggingGroupPath : "",
       imageRange: typeof parsed.imageRange === "string" ? parsed.imageRange : "",
       taggingMode,
+      onlyUntagged: typeof parsed.onlyUntagged === "boolean" ? parsed.onlyUntagged : false,
       previewDockOpen: dockLegacy,
     };
   } catch {

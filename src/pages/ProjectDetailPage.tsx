@@ -11,6 +11,7 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import {
   ChevronLeft,
   Activity,
+  Cpu,
   Settings2,
   Edit3,
   Image,
@@ -24,6 +25,7 @@ import {
 } from "lucide-react";
 import ConfigEditor from "../components/project/ConfigEditor";
 import DatasetEditor from "../components/project/DatasetEditor";
+import DiffusionPipeConfigPanel from "../components/project/DiffusionPipeConfigPanel";
 import SampleImageViewer from "../components/project/SampleImageViewer";
 import TrainingConsolePanel from "../components/project/TrainingConsolePanel";
 import {
@@ -34,11 +36,14 @@ import {
   getLatestOutputCheckpoint,
   getProject,
   listDatasetEntries,
+  loadDiffusionPipeConfig,
   loadTrainingConfig,
   onTrainingLog,
   onTrainingProgress,
   onTrainingState,
+  saveDiffusionPipeConfig,
   saveTrainingConfig,
+  startDiffusionPipeTraining,
   startTraining,
   startTrainingFromLatestWeights,
   resumeTraining,
@@ -50,6 +55,7 @@ import { appendTrainingLog, dedupeTrainingLogs, normalizeActiveJobLogs } from ".
 import type {
   ActiveJobSummary,
   DatasetEntry,
+  DiffusionPipeConfig,
   JobStatus,
   TrainingConfig,
   TrainingLogLine,
@@ -58,8 +64,16 @@ import type {
 } from "../lib/types";
 
 type ViewMode = "main" | "config" | "dataset" | "test";
+type TrainingMode = "sd-scripts" | "diffusion-pipe";
 type BadgeVariant = "orange" | "acid" | "white";
 const TERMINAL_JOB_STATUSES: JobStatus[] = ["completed", "failed", "aborted", "interrupted"];
+
+/** Tauri IPC errors arrive as plain strings, not Error objects. Extract a readable message either way. */
+function extractErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string" && err.length > 0) return err;
+  return fallback;
+}
 
 /** 仅用于推算行列数：格子在 CSS 中用 1fr 拉伸铺满容器 */
 const DATASET_PREVIEW_MIN_CELL_PX = 56;
@@ -134,6 +148,71 @@ function trainingScriptSummaryLabel(script: string, t: TranslateFn): string {
     default:
       return t("config.trainNetworkScript");
   }
+}
+
+const DP_MODEL_LABELS: Record<string, string> = {
+  "hunyuan-video": "HunyuanVideo",
+  "hunyuan_video_15": "HunyuanVideo 1.5",
+  "hunyuan_image": "HunyuanImage 2.1",
+  "wan": "Wan 2.1 / 2.2",
+  "flux": "Flux",
+  "flux2": "Flux 2",
+  "ltx-video": "LTX-Video",
+  "ltx2": "LTX 2.3",
+  "sdxl": "SDXL",
+  "sd3": "Stable Diffusion 3",
+  "cosmos": "Cosmos",
+  "cosmos_predict2": "Cosmos-Predict2",
+  "anima": "Anima (动漫)",
+  "lumina_2": "Lumina Image 2.0",
+  "chroma": "Chroma",
+  "hidream": "HiDream",
+  "omnigen2": "OmniGen2",
+  "qwen_image": "Qwen-Image",
+  "auraflow": "AuraFlow",
+  "z_image": "Z-Image",
+  "ernie_image": "Ernie-Image",
+};
+
+function dpConfigSummary(config: DiffusionPipeConfig) {
+  const modelLabel = DP_MODEL_LABELS[config.modelType] ?? config.modelType;
+  const trainingLen = config.maxSteps > 0
+    ? `总步数 (--max_steps) · ${config.maxSteps}`
+    : `Epochs · ${config.epochs}`;
+
+  const summary: { key: string; val: string; plain?: boolean }[] = [
+    { key: "模型类型", val: modelLabel },
+    { key: "预训练模型", val: config.modelPath || "—" },
+    { key: "分辨率", val: config.datasetResolutions || "—" },
+    { key: "数据集重复次数", val: String(config.numRepeats) },
+    { key: "批大小", val: String(config.microBatchSizePerGpu) },
+    { key: "训练长度", val: trainingLen },
+    { key: "学习率", val: config.lr || "—" },
+  ];
+
+  if (config.adapterType === "lora") {
+    summary.push({ key: "LoRA Rank", val: String(config.loraRank) });
+    if (config.loraDtype) summary.push({ key: "LoRA dtype", val: config.loraDtype });
+  } else if (!config.adapterType) {
+    summary.push({ key: "Adapter", val: "全量微调 (FFT)", plain: true });
+  }
+
+  summary.push({ key: "优化器", val: config.optimizerType || "—" });
+  summary.push({ key: "模型 dtype", val: config.modelDtype || "—" });
+  summary.push({ key: "Transformer dtype", val: config.transformerDtype || "—" });
+  summary.push({ key: "激活检查点", val: config.activationCheckpointing || "false", plain: true });
+
+  if (config.saveEveryNEpochs > 0) {
+    summary.push({ key: "每 N Epoch 保存", val: String(config.saveEveryNEpochs) });
+  }
+  if (config.saveEveryNSteps > 0) {
+    summary.push({ key: "每 N 步保存", val: String(config.saveEveryNSteps) });
+  }
+  if (config.resumeFromCheckpoint.trim()) {
+    summary.push({ key: "恢复训练", val: config.resumeFromCheckpoint });
+  }
+
+  return summary;
 }
 
 function configSummary(config: TrainingConfig, t: TranslateFn) {
@@ -249,6 +328,7 @@ export default function ProjectDetailPage() {
   const [job, setJob] = useState<ActiveJobSummary | null>(null);
   const [datasetEntries, setDatasetEntries] = useState<DatasetEntry[]>([]);
   const [datasetPreviewPaths, setDatasetPreviewPaths] = useState<Record<string, string | null>>({});
+  const [initialDatasetImagePath, setInitialDatasetImagePath] = useState<string | null>(null);
   const [runtimeSeconds, setRuntimeSeconds] = useState(0);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -258,6 +338,10 @@ export default function ProjectDetailPage() {
   const [datasetPreviewGridDims, setDatasetPreviewGridDims] = useState({ cols: 6, rows: 2 });
   /** Newest `.safetensors` in project output dir (mtime); drives “continue from latest”. */
   const [latestCheckpointPath, setLatestCheckpointPath] = useState<string | null>(null);
+  const [trainingMode, setTrainingMode] = useState<TrainingMode>("sd-scripts");
+  const [configTab, setConfigTab] = useState<TrainingMode>("sd-scripts");
+  const [dpConfig, setDpConfig] = useState<DiffusionPipeConfig | null>(null);
+  const [draftDpConfig, setDraftDpConfig] = useState<DiffusionPipeConfig | null>(null);
   const projectId = id ?? "";
   const projectName = project?.name ?? projectId.replace(/-/g, "_");
 
@@ -314,17 +398,19 @@ export default function ProjectDetailPage() {
 
   const loadProjectData = useCallback(async () => {
     if (!projectId) return;
-    const [projectData, configData, jobData, datasetData, latestCkpt] = await Promise.all([
+    const [projectData, configData, jobData, datasetData, latestCkpt, dpCfg] = await Promise.all([
       getProject(projectId),
       loadTrainingConfig(projectId),
       getActiveJob(projectId),
       listDatasetEntries(projectId),
       getLatestOutputCheckpoint(projectId).catch(() => null),
+      loadDiffusionPipeConfig(projectId).catch(() => null),
     ]);
 
     setProject(projectData);
     setConfig(configData);
     setDraftConfig(configData);
+    if (dpCfg) { setDpConfig(dpCfg); setDraftDpConfig(dpCfg); }
     setJob(normalizeActiveJobLogs(jobData));
     setDatasetEntries(datasetData);
     setLatestCheckpointPath(typeof latestCkpt === "string" && latestCkpt.length > 0 ? latestCkpt : null);
@@ -435,8 +521,19 @@ export default function ProjectDetailPage() {
   const lengthMode = draftConfig?.trainingLengthMode ?? "steps";
   const stepTotalForUi =
     snapshot.stepTotal ||
-    (draftConfig ? (lengthMode === "steps" ? draftConfig.maxTrainSteps : 0) : 0) ||
+    (trainingMode === "diffusion-pipe"
+      ? draftDpConfig?.maxSteps ?? 0
+      : draftConfig
+        ? lengthMode === "steps"
+          ? draftConfig.maxTrainSteps
+          : 0
+        : 0) ||
     0;
+  const epochTotalForUi =
+    snapshot.epochTotal ||
+    (trainingMode === "diffusion-pipe"
+      ? draftDpConfig?.epochs ?? 0
+      : draftConfig?.epochs ?? 0);
   const lossChartBars = lossChartBarsFromHistory(job?.history ?? []);
   const consoleLogs = useMemo(
     () =>
@@ -489,6 +586,7 @@ export default function ProjectDetailPage() {
   }, [view]);
 
   const configItems = useMemo(() => (draftConfig ? configSummary(draftConfig, t) : []), [draftConfig, t]);
+  const dpConfigItems = useMemo(() => (draftDpConfig ? dpConfigSummary(draftDpConfig) : []), [draftDpConfig]);
 
   useEffect(() => {
     if (!projectId || datasetPreviewEntries.length === 0) {
@@ -544,14 +642,26 @@ export default function ProjectDetailPage() {
     try {
       let nextJob: ActiveJobSummary;
       if (shouldStartTraining) {
-        // Backend always reads the last saved config from SQLite — unsaved edits (e.g. cleared
-        // 「网络初始权重」) would otherwise be ignored and an old `network_weights` path kept.
-        if (draftConfig) {
-          const saved = await saveTrainingConfig(projectId, draftConfig);
-          setConfig(saved);
-          setDraftConfig(saved);
+        if (trainingMode === "diffusion-pipe") {
+          // Auto-save dp config before starting, same pattern as sd-scripts below.
+          if (draftDpConfig) {
+            console.log("[dp-config] 启动训练前自动保存，参数：", JSON.parse(JSON.stringify(draftDpConfig)));
+            const saved = await saveDiffusionPipeConfig(projectId, draftDpConfig);
+            console.log("[dp-config] 自动保存完成，后端返回：", JSON.parse(JSON.stringify(saved)));
+            setDpConfig(saved);
+            setDraftDpConfig(saved);
+          }
+          nextJob = await startDiffusionPipeTraining(projectId);
+        } else {
+          // Backend always reads the last saved config from SQLite — unsaved edits (e.g. cleared
+          // 「网络初始权重」) would otherwise be ignored and an old `network_weights` path kept.
+          if (draftConfig) {
+            const saved = await saveTrainingConfig(projectId, draftConfig);
+            setConfig(saved);
+            setDraftConfig(saved);
+          }
+          nextJob = await startTraining(projectId);
         }
-        nextJob = await startTraining(projectId);
       } else {
         nextJob = await abortTraining(projectId);
       }
@@ -568,16 +678,17 @@ export default function ProjectDetailPage() {
       );
       await loadProjectData();
     } catch (actionError) {
+      const errMsg = extractErrorMessage(actionError, t("errors.controlTrainer"));
       appendConsoleNotice(
         shouldStartTraining
-          ? t("projectDetail.consoleStartFailed")
-          : t("projectDetail.consoleAbortFailed"),
+          ? `${t("projectDetail.consoleStartFailed")}: ${errMsg}`
+          : `${t("projectDetail.consoleAbortFailed")}: ${errMsg}`,
         {
           level: "warn",
           stage: shouldStartTraining ? "bootstrap" : "shutdown",
         },
       );
-      setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
+      setError(errMsg);
     } finally {
       setBusyAction(null);
     }
@@ -612,11 +723,12 @@ export default function ProjectDetailPage() {
       );
       await loadProjectData();
     } catch (actionError) {
-      appendConsoleNotice(t("projectDetail.consoleContinueFromWeightsFailed"), {
+      const errMsg = extractErrorMessage(actionError, t("errors.controlTrainer"));
+      appendConsoleNotice(`${t("projectDetail.consoleContinueFromWeightsFailed")}: ${errMsg}`, {
         level: "warn",
         stage: "bootstrap",
       });
-      setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
+      setError(errMsg);
     } finally {
       setBusyAction(null);
     }
@@ -640,11 +752,12 @@ export default function ProjectDetailPage() {
       });
       await loadProjectData();
     } catch (actionError) {
-      appendConsoleNotice(t("projectDetail.consoleResumeFailed"), {
+      const errMsg = extractErrorMessage(actionError, t("errors.controlTrainer"));
+      appendConsoleNotice(`${t("projectDetail.consoleResumeFailed")}: ${errMsg}`, {
         level: "warn",
         stage: "bootstrap",
       });
-      setError(actionError instanceof Error ? actionError.message : t("errors.controlTrainer"));
+      setError(errMsg);
     } finally {
       setBusyAction(null);
     }
@@ -686,12 +799,41 @@ export default function ProjectDetailPage() {
     switchView("main");
   };
 
+  const handleSaveDpConfig = async () => {
+    if (!projectId || !draftDpConfig) return;
+    setBusyAction("save-dp-config");
+    setError(null);
+    console.log("[dp-config] 点击应用，待保存参数：", JSON.parse(JSON.stringify(draftDpConfig)));
+    try {
+      const saved = await saveDiffusionPipeConfig(projectId, draftDpConfig);
+      console.log("[dp-config] 后端返回已保存参数：", JSON.parse(JSON.stringify(saved)));
+      setDpConfig(saved);
+      setDraftDpConfig(saved);
+      setTrainingMode("diffusion-pipe");
+      switchView("main");
+    } catch (saveError) {
+      console.error("[dp-config] 保存失败：", saveError);
+      setError(saveError instanceof Error ? saveError.message : "保存 dp 配置失败");
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const handleDiscardDpConfig = () => {
+    setDraftDpConfig(dpConfig);
+    switchView("main");
+  };
+
   const mainActionLabel = canStartTraining
-    ? t("projectDetail.start")
+    ? trainingMode === "diffusion-pipe"
+      ? "dp 训练"
+      : t("projectDetail.start")
     : t("projectDetail.abort");
 
   const MainActionIcon = canStartTraining
-    ? Play
+    ? trainingMode === "diffusion-pipe"
+      ? Cpu
+      : Play
     : Trash2;
 
   return (
@@ -759,18 +901,41 @@ export default function ProjectDetailPage() {
               <button className="btn btn-primary" onClick={() => void handleExport()} disabled={busyAction !== null}>
                 <Download size={16} /> {busyAction === "export" ? t("common.exporting") : t("common.export")}
               </button>
+              <button
+                type="button"
+                className={trainingMode === "diffusion-pipe" ? "btn btn-primary" : "btn"}
+                title={trainingMode === "diffusion-pipe" ? "切换到 sd-scripts 训练" : "切换到 diffusion-pipe 训练"}
+                onClick={() =>
+                  setTrainingMode((m) => (m === "sd-scripts" ? "diffusion-pipe" : "sd-scripts"))
+                }
+                style={{ display: "flex", alignItems: "center", gap: "0.375rem" }}
+              >
+                <Cpu size={16} />
+                {trainingMode === "diffusion-pipe" ? "diffusion-pipe" : "sd-scripts"}
+              </button>
               <button className="btn" onClick={() => switchView("test")}>
                 <FlaskConical size={16} /> {t("projectDetail.test")}
               </button>
             </div>
           ) : null}
 
-          {view === "config" ? (
+          {view === "config" && configTab === "sd-scripts" ? (
             <div className="header-actions" style={{ display: "flex", gap: "0.5rem" }}>
               <button className="btn btn-primary" onClick={() => void handleSaveConfig()} disabled={busyAction !== null}>
                 <Save size={16} /> {busyAction === "save-config" ? t("common.applying") : t("common.apply")}
               </button>
               <button className="btn" onClick={handleDiscardConfig} disabled={busyAction !== null}>
+                <X size={16} /> {t("common.discard")}
+              </button>
+            </div>
+          ) : null}
+
+          {view === "config" && configTab === "diffusion-pipe" ? (
+            <div className="header-actions" style={{ display: "flex", gap: "0.5rem" }}>
+              <button className="btn btn-primary" onClick={() => void handleSaveDpConfig()} disabled={busyAction !== null}>
+                <Save size={16} /> {busyAction === "save-dp-config" ? t("common.applying") : t("common.apply")}
+              </button>
+              <button className="btn" onClick={handleDiscardDpConfig} disabled={busyAction !== null}>
                 <X size={16} /> {t("common.discard")}
               </button>
             </div>
@@ -820,7 +985,7 @@ export default function ProjectDetailPage() {
                 <span className="prog-val">
                   {snapshot.epoch}
                   <span style={{ color: "var(--text-muted)", fontSize: "0.7rem" }}>
-                    {" "}/ {snapshot.epochTotal || draftConfig?.epochs || 0}
+                    {" "}/ {epochTotalForUi}
                   </span>
                 </span>
               </div>
@@ -896,18 +1061,22 @@ export default function ProjectDetailPage() {
 
           <div
             className="card config-card clickable-card"
-            onClick={() => switchView("config")}
+            onClick={() => {
+              setConfigTab(trainingMode);
+              switchView("config");
+            }}
             title={t("projectDetail.clickToEdit")}
             style={{ animationDelay: "0.2s" }}
           >
             <div className="card-header">
               <span className="card-title-icon">
-                <Settings2 size={18} /> {t("projectDetail.hyperparameters")}
+                {trainingMode === "diffusion-pipe" ? <Cpu size={18} /> : <Settings2 size={18} />}
+                {trainingMode === "diffusion-pipe" ? "diffusion-pipe" : t("projectDetail.hyperparameters")}
               </span>
               <Edit3 size={14} style={{ color: "var(--text-muted)" }} />
             </div>
             <div className="config-list">
-              {configItems.map((item) => (
+              {(trainingMode === "diffusion-pipe" ? dpConfigItems : configItems).map((item) => (
                 <div key={item.key} className="config-item">
                   <span className="key">{item.key}</span>
                   <span className="val" style={item.plain ? { color: "var(--text-main)" } : undefined}>
@@ -920,7 +1089,7 @@ export default function ProjectDetailPage() {
 
           <div
             className="card dataset-card clickable-card"
-            onClick={() => switchView("dataset")}
+            onClick={() => { setInitialDatasetImagePath(null); switchView("dataset"); }}
             style={{ animationDelay: "0.3s" }}
           >
             <div className="card-header">
@@ -950,6 +1119,11 @@ export default function ProjectDetailPage() {
                     title={entry.relativePath}
                     fit="cover"
                     showOverlay
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInitialDatasetImagePath(entry.relativePath);
+                      switchView("dataset");
+                    }}
                   />
                 ))
               ) : (
@@ -985,10 +1159,65 @@ export default function ProjectDetailPage() {
         </div>
       ) : null}
 
-      {view === "config" && draftConfig ? (
-        <ConfigEditor config={draftConfig} onChange={setDraftConfig} />
+      {view === "config" ? (
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {/* Training mode tab bar */}
+          <div
+            style={{
+              display: "flex",
+              gap: "0",
+              borderBottom: "1px solid var(--border)",
+              marginBottom: "0",
+              background: "var(--bg-card, var(--bg-surface))",
+            }}
+          >
+            {(["sd-scripts", "diffusion-pipe"] as TrainingMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setConfigTab(mode)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "0.4rem",
+                  padding: "0.6rem 1.25rem",
+                  fontSize: "0.82rem",
+                  background: "none",
+                  border: "none",
+                  borderBottom:
+                    configTab === mode
+                      ? "2px solid var(--accent)"
+                      : "2px solid transparent",
+                  color: configTab === mode ? "var(--accent)" : "var(--text-muted)",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  marginBottom: "-1px",
+                }}
+              >
+                {mode === "diffusion-pipe" ? <Cpu size={14} /> : <Settings2 size={14} />}
+                {mode}
+              </button>
+            ))}
+          </div>
+
+          {configTab === "sd-scripts" && draftConfig ? (
+            <ConfigEditor config={draftConfig} onChange={setDraftConfig} />
+          ) : null}
+
+          {configTab === "diffusion-pipe" ? (
+            <DiffusionPipeConfigPanel
+              config={draftDpConfig}
+              onChange={setDraftDpConfig}
+            />
+          ) : null}
+        </div>
       ) : null}
-      {view === "dataset" && projectId ? <DatasetEditor projectId={projectId} /> : null}
+      {view === "dataset" && projectId ? (
+        <DatasetEditor
+          projectId={projectId}
+          initialImagePath={initialDatasetImagePath ?? undefined}
+        />
+      ) : null}
       {view === "test" && projectId && draftConfig ? (
         <SampleImageViewer
           projectId={projectId}

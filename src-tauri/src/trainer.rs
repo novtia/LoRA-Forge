@@ -4,7 +4,8 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Stdio,
-    time::{Duration, Instant},
+    sync::{Arc, Mutex},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rusqlite::OptionalExtension;
@@ -19,9 +20,9 @@ use crate::{
     error::{AppError, AppResult},
     hardware,
     models::{
-        ActiveJobSummary, HardwareInfo, JobStatus, ProjectRecord, ProjectStatus, SystemStats,
-        TrainingConfig, TrainingEnvSettings, TrainingLogEvent, TrainingProgressEvent,
-        TrainingSnapshot, TrainingStateChangedEvent,
+        ActiveJobSummary, DiffusionPipeConfig, HardwareInfo, JobStatus, ProjectRecord,
+        ProjectStatus, SystemStats, TrainingConfig, TrainingEnvSettings, TrainingLogEvent,
+        TrainingProgressEvent, TrainingSnapshot, TrainingStateChangedEvent,
     },
     state::{AppState, RuntimeJob, RuntimeJobControlMode},
     utils::now_ts,
@@ -35,6 +36,67 @@ const STRUCTURED_LOG_PREFIX: &str = "@@LORA_FORGE_LOG@@";
 const STRUCTURED_LOG_SCHEMA: &str = "lora-forge.training.log/v1";
 const ABORT_GRACE_PERIOD: Duration = Duration::from_secs(3);
 const ABORT_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+type SharedLogFile = Arc<Mutex<Box<dyn std::io::Write + Send>>>;
+
+fn is_leap_year(y: u32) -> bool {
+    y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
+}
+
+/// Format current UTC time as `YYYY-MM-DD HH:MM:SS` without external crates.
+fn utc_now_str() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let sec = (secs % 60) as u8;
+    let min = ((secs / 60) % 60) as u8;
+    let hour = ((secs / 3600) % 24) as u8;
+    let mut days = (secs / 86400) as u32;
+    let mut year = 1970u32;
+    loop {
+        let dy = if is_leap_year(year) { 366 } else { 365 };
+        if days < dy {
+            break;
+        }
+        days -= dy;
+        year += 1;
+    }
+    let month_lens: [u8; 12] = [
+        31,
+        if is_leap_year(year) { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut month = 1u8;
+    for &len in &month_lens {
+        if days < len as u32 {
+            break;
+        }
+        days -= len as u32;
+        month += 1;
+    }
+    let day = (days + 1) as u8;
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{min:02}:{sec:02}")
+}
+
+/// Open (or create) the project-level log file at `{root_path}/logs/{job_id}.log`.
+/// Falls back to a silent sink so training is never blocked by logging failures.
+fn open_project_log_file(root_path: &str, job_id: &str) -> SharedLogFile {
+    let try_open = || -> std::io::Result<SharedLogFile> {
+        let logs_dir = Path::new(root_path).join("logs");
+        fs::create_dir_all(&logs_dir)?;
+        let log_path = logs_dir.join(format!("{job_id}.log"));
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)?;
+        Ok(Arc::new(Mutex::new(Box::new(file) as Box<dyn std::io::Write + Send>)))
+    };
+    try_open().unwrap_or_else(|e| {
+        eprintln!("Failed to open project log file: {e}");
+        Arc::new(Mutex::new(Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>))
+    })
+}
 
 /// Shell-like single line for logs (quote args that contain whitespace).
 fn format_training_invocation(cmd: &tokio::process::Command) -> String {
@@ -250,10 +312,13 @@ pub async fn start_training(
 
     emit_state_change(&app, &project.id, &job_id, JobStatus::Running);
 
+    let log_file = open_project_log_file(&project.root_path, &job_id);
+
     let stdout_state = state.clone();
     let stdout_app = app.clone();
     let stdout_job_id = job_id.clone();
     let stdout_project_id = project.id.clone();
+    let stdout_log = log_file.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = stream_logs(
             stdout_app,
@@ -262,6 +327,7 @@ pub async fn start_training(
             stdout_job_id,
             "stdout",
             stdout,
+            stdout_log,
         )
         .await
         {
@@ -273,6 +339,7 @@ pub async fn start_training(
     let stderr_app = app.clone();
     let stderr_job_id = job_id.clone();
     let stderr_project_id = project.id.clone();
+    let stderr_log = log_file.clone();
     tauri::async_runtime::spawn(async move {
         if let Err(error) = stream_logs(
             stderr_app,
@@ -281,6 +348,7 @@ pub async fn start_training(
             stderr_job_id,
             "stderr",
             stderr,
+            stderr_log,
         )
         .await
         {
@@ -365,7 +433,9 @@ fn build_training_command(
         .paths()
         .jobs_dir
         .join(format!("{job_id}.dataset.toml"));
-    write_dataset_config(project, config, &dataset_config_path)?;
+    let group_types =
+        state.with_db(|connection| db::load_dataset_group_types(connection, &project.id))?;
+    write_dataset_config(project, config, &dataset_config_path, &group_types)?;
     let sample_output_dir = PathBuf::from(&project.root_path).join("sample");
     fs::create_dir_all(&sample_output_dir)?;
     let sample_prompts_path = if sample_generation_enabled(config) {
@@ -725,6 +795,7 @@ fn write_dataset_config(
     project: &ProjectRecord,
     config: &TrainingConfig,
     destination: &Path,
+    group_types: &std::collections::HashMap<String, String>,
 ) -> AppResult<()> {
     let dataset_root = PathBuf::from(&project.dataset_path);
     let image_dirs = collect_dataset_image_dirs(&dataset_root)?;
@@ -745,7 +816,13 @@ fn write_dataset_config(
             config.bucket_reso_steps
         ));
     }
-    for image_dir in image_dirs {
+    for image_dir in &image_dirs {
+        let rel = image_dir
+            .strip_prefix(&dataset_root)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        let is_reg = group_types.get(&rel).map(|t| t == "reg").unwrap_or(false);
+
         config_toml.push_str("\n  [[datasets.subsets]]\n");
         config_toml.push_str(&format!(
             "  image_dir = {}\n",
@@ -753,6 +830,9 @@ fn write_dataset_config(
         ));
         config_toml.push_str(&format!("  num_repeats = {}\n", config.dataset_repeats));
         config_toml.push_str("  caption_extension = \".txt\"\n");
+        if is_reg {
+            config_toml.push_str("  is_reg = true\n");
+        }
     }
 
     fs::write(destination, config_toml)?;
@@ -1149,6 +1229,7 @@ async fn stream_logs<R>(
     job_id: String,
     stream: &str,
     reader: R,
+    log_file: SharedLogFile,
 ) -> AppResult<()>
 where
     R: tokio::io::AsyncRead + Unpin,
@@ -1164,14 +1245,14 @@ where
         }
         for &byte in &chunk[..n] {
             if byte == b'\n' || byte == b'\r' {
-                flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending).await?;
+                flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending, &log_file).await?;
             } else {
                 pending.push(byte);
             }
         }
     }
 
-    flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending).await?;
+    flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending, &log_file).await?;
 
     Ok(())
 }
@@ -1183,6 +1264,7 @@ async fn flush_pending(
     job_id: &str,
     stream: &str,
     pending: &mut Vec<u8>,
+    log_file: &SharedLogFile,
 ) -> AppResult<()> {
     if pending.is_empty() {
         return Ok(());
@@ -1193,7 +1275,7 @@ async fn flush_pending(
     if trimmed.is_empty() {
         return Ok(());
     }
-    handle_stream_line(app, state, project_id, job_id, stream, trimmed).await
+    handle_stream_line(app, state, project_id, job_id, stream, trimmed, log_file).await
 }
 
 async fn handle_stream_line(
@@ -1203,6 +1285,7 @@ async fn handle_stream_line(
     job_id: &str,
     stream: &str,
     line: &str,
+    log_file: &SharedLogFile,
 ) -> AppResult<()> {
     let created_at = now_ts();
     let structured = parse_structured_log_line(line);
@@ -1243,8 +1326,13 @@ async fn handle_stream_line(
         },
     );
 
+    // Write raw line to project log file (best-effort, never block training on failure)
+    if let Ok(mut file) = log_file.lock() {
+        let _ = writeln!(&mut **file, "[{}] [{}] {}", utc_now_str(), stream, line);
+    }
+
     let fallback_progress = if structured.is_none() && !job_has_structured_logs(state, job_id)? {
-        parse_progress_line(line)
+        parse_progress_line(line).or_else(|| parse_deepspeed_progress_line(line))
     } else {
         None
     };
@@ -1843,3 +1931,600 @@ fn required_arg(args: &[String], flag: &str) -> AppResult<String> {
         .cloned()
         .ok_or_else(|| AppError::Process(format!("Missing value for flag '{flag}'")))
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// diffusion-pipe WSL training support
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Convert a Windows path like `D:\foo\bar` to a WSL path `/mnt/d/foo/bar`.
+/// If the path is already a Unix-style path (starts with `/`), return as-is.
+pub fn windows_path_to_wsl(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.starts_with('/') {
+        return trimmed.to_string();
+    }
+    // Handle UNC prefix stripped paths like `\\?\D:\foo` → skip prefix
+    let normalized = if trimmed.starts_with("\\\\?\\") {
+        &trimmed[4..]
+    } else {
+        trimmed
+    };
+    // Match `X:\rest` or `X:/rest`
+    let chars: Vec<char> = normalized.chars().collect();
+    if chars.len() >= 2 && chars[1] == ':' {
+        let drive = chars[0].to_ascii_lowercase();
+        let rest = &normalized[2..];
+        let unix_rest = rest.replace('\\', "/");
+        let unix_rest = unix_rest.trim_start_matches('/');
+        if unix_rest.is_empty() {
+            return format!("/mnt/{drive}");
+        }
+        return format!("/mnt/{drive}/{unix_rest}");
+    }
+    // Fallback: just replace backslashes
+    normalized.replace('\\', "/")
+}
+
+fn write_diffusion_pipe_dataset_toml(
+    project: &ProjectRecord,
+    config: &DiffusionPipeConfig,
+    destination: &std::path::Path,
+    group_types: &std::collections::HashMap<String, String>,
+) -> AppResult<()> {
+    let dataset_wsl = windows_path_to_wsl(&project.dataset_path);
+    let resolutions = config.dataset_resolutions.trim();
+    let frame_buckets = config.frame_buckets.trim();
+
+    let mut toml = String::new();
+
+    // resolutions
+    let res_parts: Vec<&str> = resolutions.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    if res_parts.len() == 1 {
+        toml.push_str(&format!("resolutions = [{}]\n", res_parts[0]));
+    } else if res_parts.len() > 1 {
+        let joined = res_parts.join(", ");
+        toml.push_str(&format!("resolutions = [{joined}]\n"));
+    } else {
+        toml.push_str("resolutions = [512]\n");
+    }
+
+    if config.enable_ar_bucket {
+        toml.push_str("enable_ar_bucket = true\n");
+        toml.push_str("min_ar = 0.5\n");
+        toml.push_str("max_ar = 2.0\n");
+        toml.push_str(&format!("num_ar_buckets = {}\n", config.num_ar_buckets));
+    }
+
+    // frame buckets
+    let fb_parts: Vec<&str> = frame_buckets.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    if !fb_parts.is_empty() {
+        let joined = fb_parts.join(", ");
+        toml.push_str(&format!("frame_buckets = [{joined}]\n"));
+    }
+
+    // Collect all leaf directories that actually contain images.
+    // This mirrors how sd-scripts recurses into @N_triggerword subdirectories.
+    let dataset_win = std::path::Path::new(&project.dataset_path);
+    let image_dirs = collect_dataset_image_dirs(dataset_win).unwrap_or_else(|_| {
+        // Fallback: use the root dataset path as-is.
+        vec![dataset_win.to_path_buf()]
+    });
+
+    // Filter out regularization directories — diffusion-pipe has no is_reg concept.
+    let training_dirs: Vec<&PathBuf> = image_dirs
+        .iter()
+        .filter(|dir| {
+            let rel = dir
+                .strip_prefix(dataset_win)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            !group_types.get(&rel).map(|t| t == "reg").unwrap_or(false)
+        })
+        .collect();
+
+    if training_dirs.is_empty() {
+        // Nothing found (or all dirs are reg) — point at root so dp gives a readable error.
+        toml.push('\n');
+        toml.push_str("[[directory]]\n");
+        toml.push_str(&format!("path = {}\n", toml_string(&dataset_wsl)));
+        toml.push_str(&format!("num_repeats = {}\n", config.num_repeats));
+    } else {
+        for dir in &training_dirs {
+            let dir_wsl = windows_path_to_wsl(&dir.to_string_lossy());
+            toml.push('\n');
+            toml.push_str("[[directory]]\n");
+            toml.push_str(&format!("path = {}\n", toml_string(&dir_wsl)));
+            toml.push_str(&format!("num_repeats = {}\n", config.num_repeats));
+        }
+    }
+
+    fs::write(destination, toml)?;
+    Ok(())
+}
+
+fn write_diffusion_pipe_main_toml(
+    project: &ProjectRecord,
+    config: &DiffusionPipeConfig,
+    dataset_toml_wsl_path: &str,
+    destination: &std::path::Path,
+) -> AppResult<()> {
+    let output_wsl = windows_path_to_wsl(&project.output_path);
+    let mut toml = String::new();
+
+    toml.push_str(&format!("output_dir = {}\n", toml_string(&output_wsl)));
+    toml.push_str(&format!("dataset = {}\n\n", toml_string(dataset_toml_wsl_path)));
+
+    toml.push_str(&format!("epochs = {}\n", config.epochs));
+    if config.max_steps > 0 {
+        toml.push_str(&format!("max_steps = {}\n", config.max_steps));
+    }
+    toml.push_str(&format!("micro_batch_size_per_gpu = {}\n", config.micro_batch_size_per_gpu));
+    toml.push_str(&format!("pipeline_stages = 1\n"));
+    toml.push_str(&format!("gradient_accumulation_steps = {}\n", config.gradient_accumulation_steps));
+
+    let gc = config.gradient_clipping.trim();
+    if !gc.is_empty() {
+        toml.push_str(&format!("gradient_clipping = {gc}\n"));
+    }
+    if config.warmup_steps > 0 {
+        toml.push_str(&format!("warmup_steps = {}\n", config.warmup_steps));
+    }
+
+    toml.push_str("\neval_every_n_epochs = 1\n");
+    toml.push_str("eval_before_first_step = true\n");
+    toml.push_str("eval_micro_batch_size_per_gpu = 1\n");
+    toml.push_str("eval_gradient_accumulation_steps = 1\n\n");
+
+    if config.save_every_n_epochs > 0 {
+        toml.push_str(&format!("save_every_n_epochs = {}\n", config.save_every_n_epochs));
+    }
+    if config.save_every_n_steps > 0 {
+        toml.push_str(&format!("save_every_n_steps = {}\n", config.save_every_n_steps));
+    }
+    if config.checkpoint_every_n_minutes > 0 {
+        toml.push_str(&format!("checkpoint_every_n_minutes = {}\n", config.checkpoint_every_n_minutes));
+    }
+
+    let ac = config.activation_checkpointing.trim();
+    match ac {
+        "false" | "0" | "" => {}
+        "unsloth" => toml.push_str("activation_checkpointing = 'unsloth'\n"),
+        _ => toml.push_str("activation_checkpointing = true\n"),
+    }
+
+    if config.blocks_to_swap > 0 {
+        toml.push_str(&format!("blocks_to_swap = {}\n", config.blocks_to_swap));
+    }
+
+    toml.push_str("partition_method = 'parameters'\n");
+
+    let save_dtype = config.save_dtype.trim();
+    if !save_dtype.is_empty() {
+        toml.push_str(&format!("save_dtype = {}\n", toml_single_quoted(save_dtype)));
+    }
+    toml.push_str("caching_batch_size = 1\n");
+    toml.push_str(&format!("steps_per_print = {}\n", config.steps_per_print.max(1)));
+
+    // [model]
+    toml.push_str("\n[model]\n");
+    let model_type = config.model_type.trim();
+    toml.push_str(&format!("type = {}\n", toml_single_quoted(model_type)));
+
+    // Determine how model_path maps to a TOML key.
+    // - diffusers_path  : qwen_image / ernie_image / z_image
+    // - ckpt_path       : hunyuan-video / hunyuan_video_15 (directory with all weights)
+    // - transformer_path: everything else (anima/cosmos_predict2, flux, sd3, sdxl, …)
+    let uses_diffusers_path = matches!(model_type, "qwen_image" | "ernie_image" | "z_image");
+    let uses_ckpt_path      = matches!(model_type, "hunyuan-video" | "hunyuan_video_15");
+
+    let model_path = config.model_path.trim();
+    let extra_transformer_path = config.transformer_path.trim();
+
+    if !model_path.is_empty() {
+        let wsl_path = windows_path_to_wsl(model_path);
+        if uses_diffusers_path {
+            toml.push_str(&format!("diffusers_path = {}\n", toml_string(&wsl_path)));
+        } else if uses_ckpt_path {
+            toml.push_str(&format!("ckpt_path = {}\n", toml_string(&wsl_path)));
+        } else {
+            // For anima, flux, chroma, etc.: model_path is the transformer.
+            // Only emit here when the user hasn't also filled in the explicit transformer_path field.
+            if extra_transformer_path.is_empty() {
+                toml.push_str(&format!("transformer_path = {}\n", toml_string(&wsl_path)));
+            }
+        }
+    }
+
+    // Explicit transformer_path field (always respected, overrides model_path for split-weight models)
+    if !extra_transformer_path.is_empty() {
+        let wsl_path = windows_path_to_wsl(extra_transformer_path);
+        toml.push_str(&format!("transformer_path = {}\n", toml_string(&wsl_path)));
+    }
+    let vae_path = config.vae_path.trim();
+    if !vae_path.is_empty() {
+        let wsl_path = windows_path_to_wsl(vae_path);
+        toml.push_str(&format!("vae_path = {}\n", toml_string(&wsl_path)));
+    }
+    let llm_path = config.llm_path.trim();
+    if !llm_path.is_empty() {
+        let wsl_path = windows_path_to_wsl(llm_path);
+        toml.push_str(&format!("llm_path = {}\n", toml_string(&wsl_path)));
+    }
+    let clip_path = config.clip_path.trim();
+    if !clip_path.is_empty() {
+        let wsl_path = windows_path_to_wsl(clip_path);
+        toml.push_str(&format!("clip_path = {}\n", toml_string(&wsl_path)));
+    }
+
+    let dtype = config.model_dtype.trim();
+    if !dtype.is_empty() {
+        toml.push_str(&format!("dtype = {}\n", toml_single_quoted(dtype)));
+    }
+    let transformer_dtype = config.transformer_dtype.trim();
+    if !transformer_dtype.is_empty() {
+        toml.push_str(&format!("transformer_dtype = {}\n", toml_single_quoted(transformer_dtype)));
+    }
+    let tsm = config.timestep_sample_method.trim();
+    if !tsm.is_empty() {
+        toml.push_str(&format!("timestep_sample_method = {}\n", toml_single_quoted(tsm)));
+    }
+
+    // [adapter] — omit entirely for full fine-tuning
+    let adapter_type = config.adapter_type.trim();
+    if !adapter_type.is_empty() {
+        toml.push_str("\n[adapter]\n");
+        toml.push_str(&format!("type = {}\n", toml_single_quoted(adapter_type)));
+        if adapter_type == "lora" {
+            toml.push_str(&format!("rank = {}\n", config.lora_rank));
+            let lora_dtype = config.lora_dtype.trim();
+            if !lora_dtype.is_empty() {
+                toml.push_str(&format!("dtype = {}\n", toml_single_quoted(lora_dtype)));
+            }
+        }
+    }
+
+    // [optimizer]
+    toml.push_str("\n[optimizer]\n");
+    let opt_type = config.optimizer_type.trim();
+    if !opt_type.is_empty() {
+        toml.push_str(&format!("type = {}\n", toml_single_quoted(opt_type)));
+    }
+    let lr = config.lr.trim();
+    if !lr.is_empty() {
+        toml.push_str(&format!("lr = {lr}\n"));
+    }
+    let wd = config.weight_decay.trim();
+    if !wd.is_empty() {
+        toml.push_str(&format!("weight_decay = {wd}\n"));
+    }
+    // Standard AdamW-like defaults
+    if matches!(opt_type, "adamw_optimi" | "AdamW8bitKahan" | "AdamW") {
+        toml.push_str("betas = [0.9, 0.99]\n");
+        toml.push_str("eps = 1e-8\n");
+    }
+
+    // [monitoring]
+    toml.push_str("\n[monitoring]\nenable_wandb = false\n");
+
+    fs::write(destination, toml)?;
+    Ok(())
+}
+
+fn toml_single_quoted(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "\\'"))
+}
+
+pub fn build_diffusion_pipe_command(
+    state: &AppState,
+    project: &ProjectRecord,
+    config: &DiffusionPipeConfig,
+    env_settings: &TrainingEnvSettings,
+    job_id: &str,
+) -> AppResult<(tokio::process::Command, RuntimeJobControlMode)> {
+    let distro = env_settings.wsl_distro.trim();
+    if distro.is_empty() {
+        return Err(AppError::Validation(
+            "WSL distribution name is not configured. Set it in Design → Training Env.".to_string(),
+        ));
+    }
+
+    let dp_wsl_path = env_settings.diffusion_pipe_wsl_path.trim();
+    if dp_wsl_path.is_empty() {
+        return Err(AppError::Validation(
+            "diffusion-pipe WSL path is not configured. Set it in Design → Training Env.".to_string(),
+        ));
+    }
+
+    let venv_path = env_settings.diffusion_pipe_venv_path.trim();
+    let num_gpus = env_settings.num_gpus.max(1);
+
+    // Write dataset TOML
+    let dataset_toml_path = state
+        .paths()
+        .jobs_dir
+        .join(format!("{job_id}.dp.dataset.toml"));
+    let group_types =
+        state.with_db(|connection| db::load_dataset_group_types(connection, &project.id))?;
+    write_diffusion_pipe_dataset_toml(project, config, &dataset_toml_path, &group_types)?;
+    let dataset_toml_wsl = windows_path_to_wsl(&dataset_toml_path.to_string_lossy());
+
+    // Write main TOML
+    let main_toml_path = state.paths().jobs_dir.join(format!("{job_id}.dp.toml"));
+    write_diffusion_pipe_main_toml(project, config, &dataset_toml_wsl, &main_toml_path)?;
+    let main_toml_wsl = windows_path_to_wsl(&main_toml_path.to_string_lossy());
+
+    // Build bash command string
+    let mut bash_parts: Vec<String> = Vec::new();
+
+    if !venv_path.is_empty() {
+        bash_parts.push(format!("source {}/bin/activate", venv_path));
+    }
+
+    if config.nccl_disable {
+        bash_parts.push("export NCCL_P2P_DISABLE=1 NCCL_IB_DISABLE=1".to_string());
+    }
+
+    bash_parts.push(format!("cd {dp_wsl_path}"));
+
+    let mut ds_cmd = format!(
+        "deepspeed --num_gpus={num_gpus} train.py --deepspeed --config {main_toml_wsl}"
+    );
+
+    let resume = config.resume_from_checkpoint.trim();
+    if !resume.is_empty() {
+        if resume == "latest" {
+            ds_cmd.push_str(" --resume_from_checkpoint");
+        } else {
+            let resume_wsl = windows_path_to_wsl(resume);
+            ds_cmd.push_str(&format!(" --resume_from_checkpoint {resume_wsl}"));
+        }
+    }
+
+    bash_parts.push(ds_cmd);
+
+    let bash_script = bash_parts.join(" && ");
+
+    let mut command = if distro.is_empty() || distro == "default" {
+        let mut cmd = tokio::process::Command::new("wsl");
+        cmd.arg("--").arg("bash").arg("-c").arg(&bash_script);
+        cmd
+    } else {
+        let mut cmd = tokio::process::Command::new("wsl");
+        cmd.arg("-d").arg(distro).arg("--").arg("bash").arg("-c").arg(&bash_script);
+        cmd
+    };
+
+    command.env("PYTHONUNBUFFERED", "1");
+
+    Ok((command, RuntimeJobControlMode::ProcessSignals))
+}
+
+/// Parse a DeepSpeed training log line for progress information.
+fn parse_deepspeed_progress_line(line: &str) -> Option<ParsedProgress> {
+    // diffusion-pipe progress: `steps: X loss: Y iter time (s): Z samples/sec: W`
+    if let Some(rest) = line.strip_prefix("steps: ") {
+        let step_end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        let step: Option<u32> = rest[..step_end].parse().ok();
+        if step.is_some() {
+            return Some(ParsedProgress {
+                step,
+                loss: extract_float_after(rest, "loss: "),
+                ..ParsedProgress::default()
+            });
+        }
+    }
+
+    // DeepSpeed gradient_release optimizer: `step=X, skipped=Y, lr=[Z, ...], mom=[...]`
+    if line.contains("step=") && line.contains("lr=") {
+        let mut parsed = ParsedProgress::default();
+        for token in line.split(',') {
+            let token = token.trim();
+            if let Some(val) = token.strip_prefix("step=") {
+                parsed.step = val.trim().parse().ok();
+            } else if let Some(val) = token.strip_prefix("lr=") {
+                // Handle both scalar `lr=2e-5` and array `lr=[2e-5, 2e-5, ...]`
+                let lr_str = val.trim().trim_start_matches('[');
+                let first = lr_str
+                    .split(',')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_end_matches(']');
+                parsed.lr = first.parse().ok();
+            }
+        }
+        if parsed.step.is_some() {
+            return Some(parsed);
+        }
+    }
+
+    // `Started new epoch: N`
+    if let Some(epoch_str) = line.strip_prefix("Started new epoch: ") {
+        let epoch: u32 = epoch_str.trim().parse().ok()?;
+        return Some(ParsedProgress {
+            epoch: Some(epoch),
+            ..ParsedProgress::default()
+        });
+    }
+
+    None
+}
+
+pub async fn start_diffusion_pipe_training(
+    app: AppHandle,
+    state: AppState,
+    project: ProjectRecord,
+    config: DiffusionPipeConfig,
+) -> AppResult<ActiveJobSummary> {
+    if state.runtime_job(&project.id)?.is_some() {
+        return Err(AppError::Validation(format!(
+            "Project '{}' already has a running trainer",
+            project.name
+        )));
+    }
+
+    let env_settings = state.with_db(db::load_training_env)?;
+
+    let job_id = format!("{}-{}", project.id, now_ts());
+    let control_file = state.paths().jobs_dir.join(format!("{job_id}.control"));
+    fs::write(&control_file, "running")?;
+
+    let (mut command, control_mode) =
+        build_diffusion_pipe_command(&state, &project, &config, &env_settings, &job_id)?;
+    let command_line = format_training_invocation(&command);
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+
+    let mut child = command.spawn()?;
+    let pid = child.id();
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AppError::Process("Trainer stdout pipe was unavailable".to_string()))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| AppError::Process("Trainer stderr pipe was unavailable".to_string()))?;
+
+    state.with_db(|connection| {
+        db::create_job(connection, &job_id, &project.id, pid, JobStatus::Running)?;
+        db::update_project_status(connection, &project.id, ProjectStatus::Running)?;
+        let initial_snapshot = TrainingSnapshot {
+            epoch: 1,
+            epoch_total: config.epochs.max(1),
+            step: 0,
+            step_total: if config.max_steps > 0 { config.max_steps } else { 0 },
+            loss: 0.185,
+            lr: config.lr.trim().parse::<f64>().unwrap_or(2e-5),
+            runtime_seconds: 0,
+            pid,
+            status: JobStatus::Running,
+        };
+        db::append_snapshot(connection, &job_id, &initial_snapshot)?;
+        let bootstrap_msg = "Bootstrapping diffusion-pipe trainer...";
+        db::append_log(
+            connection,
+            &job_id,
+            "stdout",
+            "info",
+            bootstrap_msg,
+            now_ts(),
+            Some("lifecycle"),
+            Some("bootstrap"),
+            Some("TRAINER_BOOTSTRAP"),
+            Some(bootstrap_msg),
+            None,
+            None,
+        )?;
+        let cmd_log = format!("Training command: {command_line}");
+        db::append_log(
+            connection,
+            &job_id,
+            "stdout",
+            "info",
+            &cmd_log,
+            now_ts(),
+            Some("lifecycle"),
+            Some("bootstrap"),
+            Some("TRAINER_COMMAND"),
+            Some(&cmd_log),
+            None,
+            None,
+        )?;
+        Ok(())
+    })?;
+
+    let runtime_job = RuntimeJob {
+        job_id: job_id.clone(),
+        project_id: project.id.clone(),
+        pid,
+        control_file: control_file.clone(),
+        control_mode,
+        child: std::sync::Arc::new(tokio::sync::Mutex::new(child)),
+    };
+    state.insert_runtime_job(runtime_job.clone())?;
+
+    emit_state_change(&app, &project.id, &job_id, JobStatus::Running);
+
+    let log_file = open_project_log_file(&project.root_path, &job_id);
+
+    let stdout_state = state.clone();
+    let stdout_app = app.clone();
+    let stdout_job_id = job_id.clone();
+    let stdout_project_id = project.id.clone();
+    let stdout_log = log_file.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = stream_logs(
+            stdout_app,
+            stdout_state,
+            stdout_project_id,
+            stdout_job_id,
+            "stdout",
+            stdout,
+            stdout_log,
+        )
+        .await
+        {
+            eprintln!("stdout stream failed: {error}");
+        }
+    });
+
+    let stderr_state = state.clone();
+    let stderr_app = app.clone();
+    let stderr_job_id = job_id.clone();
+    let stderr_project_id = project.id.clone();
+    let stderr_log = log_file.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(error) = stream_logs(
+            stderr_app,
+            stderr_state,
+            stderr_project_id,
+            stderr_job_id,
+            "stderr",
+            stderr,
+            stderr_log,
+        )
+        .await
+        {
+            eprintln!("stderr stream failed: {error}");
+        }
+    });
+
+    let wait_state = state.clone();
+    let wait_app = app.clone();
+    let wait_project_id = project.id.clone();
+    let wait_job_id = job_id.clone();
+    tauri::async_runtime::spawn(async move {
+        let final_status = match wait_for_child(runtime_job).await {
+            Ok((child_pid, success)) => {
+                let status =
+                    final_status_after_exit(&wait_state, &wait_job_id, &control_file, success);
+                finalize_job(&wait_state, &wait_project_id, &wait_job_id, status, child_pid)
+            }
+            Err(error) => {
+                eprintln!("trainer wait failed: {error}");
+                finalize_job(
+                    &wait_state,
+                    &wait_project_id,
+                    &wait_job_id,
+                    JobStatus::Failed,
+                    None,
+                )
+            }
+        };
+        wait_state.remove_runtime_job(&wait_project_id).ok();
+        emit_state_change(&wait_app, &wait_project_id, &wait_job_id, final_status);
+    });
+
+    state
+        .with_db(|connection| db::get_active_job(connection, Some(&project.id)))?
+        .ok_or_else(|| AppError::Process("Failed to load started job summary".to_string()))
+}
+

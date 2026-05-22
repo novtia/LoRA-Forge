@@ -498,3 +498,45 @@ export function saveCustomPresetsToStorage(presets: TrainingPreset[]): void {
   if (typeof localStorage === "undefined") return;
   localStorage.setItem(CUSTOM_PRESET_STORAGE_KEY, JSON.stringify(presets));
 }
+
+// ─── diffusion-pipe presets ───────────────────────────────────────────────────
+
+import type { DiffusionPipeConfig } from "./types";
+
+const DP_PRESET_STORAGE_KEY = "lora-forge.dpPresets";
+
+export interface DiffusionPipePreset {
+  id: string;
+  label: string;
+  config: Partial<DiffusionPipeConfig>;
+}
+
+export function loadDpPresetsFromStorage(): DiffusionPipePreset[] {
+  if (typeof localStorage === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(DP_PRESET_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((p): p is DiffusionPipePreset => {
+      if (!p || typeof p !== "object") return false;
+      const id = (p as DiffusionPipePreset).id;
+      return typeof id === "string" && id.startsWith("dp-") && (p as DiffusionPipePreset).config != null;
+    });
+  } catch {
+    return [];
+  }
+}
+
+export function saveDpPresetsToStorage(presets: DiffusionPipePreset[]): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(DP_PRESET_STORAGE_KEY, JSON.stringify(presets));
+}
+
+export function createDpPreset(name: string, config: DiffusionPipeConfig): DiffusionPipePreset {
+  return {
+    id: `dp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    label: name.trim(),
+    config,
+  };
+}

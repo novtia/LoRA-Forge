@@ -120,6 +120,10 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.apiLogEmpty": "No API log entries yet.",
     "dataset.totalImages": "Total {{total}} images",
     "dataset.totalImagesInScope": "{{total}} image(s) in scope",
+    "dataset.onlyUntagged": "Only untagged images",
+    "dataset.untaggedCount": "{{count}} untagged",
+    "dataset.untaggedInScope": "{{count}} / {{total}} untagged",
+    "dataset.batchNoUntagged": "All images in scope already have captions.",
     "dataset.batchTaggingScope.label": "Batch tagging applies to",
     "dataset.batchTaggingScope.folderMenuAria": "Choose folder for batch tagging",
     "dataset.batchTaggingScope.selectionHint":
@@ -144,6 +148,8 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.groupRemoveContents": "Delete group and all its images",
     "dataset.groupRemoveConfirm":
       "Delete the group '{{name}}' and every image inside it? This cannot be undone.",
+    "dataset.groupTypeSetReg": "Set as regularization dataset (REG)",
+    "dataset.groupTypeSetNormal": "Remove regularization flag",
     "dataset.moveToRoot": "Move out of group",
     "dataset.contextSelectOnly": "Select only this",
     "dataset.contextAddSelection": "Add to selection",
@@ -712,6 +718,10 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.apiLogEmpty": "暂无 API 日志。",
     "dataset.totalImages": "共 {{total}} 张图片",
     "dataset.totalImagesInScope": "当前范围内共 {{total}} 张",
+    "dataset.onlyUntagged": "仅未打标图片",
+    "dataset.untaggedCount": "{{count}} 张未打标",
+    "dataset.untaggedInScope": "{{count}} / {{total}} 张未打标",
+    "dataset.batchNoUntagged": "当前范围内所有图片均已有标签。",
     "dataset.batchTaggingScope.label": "批量打标作用范围",
     "dataset.batchTaggingScope.folderMenuAria": "选择批量打标的文件夹",
     "dataset.batchTaggingScope.selectionHint":
@@ -736,6 +746,8 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.groupRemoveContents": "删除分组及其全部图片",
     "dataset.groupRemoveConfirm":
       "确定要删除分组「{{name}}」及其中的所有图片吗？此操作不可撤销。",
+    "dataset.groupTypeSetReg": "设为正则数据集（REG）",
+    "dataset.groupTypeSetNormal": "取消正则标记",
     "dataset.moveToRoot": "移出分组到根目录",
     "dataset.contextSelectOnly": "只选中此项",
     "dataset.contextAddSelection": "加入当前选择",

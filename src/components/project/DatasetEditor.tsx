@@ -15,10 +15,12 @@ import {
   getDatasetAsset,
   getRecentApiLogs,
   groupDatasetImages,
+  listUntaggedImagePaths,
   moveDatasetImages,
   readCaption,
   removeDatasetGroup,
   renameDatasetGroup,
+  setDatasetGroupType,
   loadTrainingConfig,
   writeCaption,
 } from "../../lib/desktopApi";
@@ -59,9 +61,10 @@ import {
 
 interface DatasetEditorProps {
   projectId: string;
+  initialImagePath?: string;
 }
 
-export default function DatasetEditor({ projectId }: DatasetEditorProps) {
+export default function DatasetEditor({ projectId, initialImagePath }: DatasetEditorProps) {
   const { t } = useI18n();
   const [entries, setEntries] = useState<DatasetEntry[]>([]);
   const [asset, setAsset] = useState<DatasetAsset | null>(null);
@@ -79,6 +82,9 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
   const [batchTaggingGroupPath, setBatchTaggingGroupPath] = useState("");
   const [imageRange, setImageRange] = useState("");
   const [batchProgress, setBatchProgress] = useState<BatchProgress | null>(null);
+  const [onlyUntagged, setOnlyUntagged] = useState(false);
+  /** null = not loaded yet; string[] = paths of untagged images in current batch scope */
+  const [untaggedPaths, setUntaggedPaths] = useState<string[] | null>(null);
   const [triggerWord, setTriggerWord] = useState("");
   /**
    * Raw user input for the insertion slot of the trigger word.
@@ -109,6 +115,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     y: number;
     targetPath: string;
     targetKind: "image" | "directory" | "background";
+    targetGroupType?: import("../../lib/types").DatasetGroupType;
   } | null>(null);
   /** Modal prompt currently open in the sidebar (create / rename group). */
   const [promptDialog, setPromptDialog] = useState<{
@@ -183,6 +190,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     setBatchTaggingGroupPath(saved?.batchTaggingGroupPath ?? "");
     setImageRange(saved?.imageRange ?? "");
     setTaggingMode(saved?.taggingMode === "range" ? "range" : "all");
+    setOnlyUntagged(Boolean(saved?.onlyUntagged));
     setPreviewDockOpen(Boolean(saved?.previewDockOpen));
     setPersistReadyProjectId(projectId);
   }, [projectId]);
@@ -217,6 +225,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       batchTaggingGroupPath,
       imageRange,
       taggingMode,
+      onlyUntagged,
       previewDockOpen,
     });
   }, [
@@ -231,6 +240,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     batchTaggingGroupPath,
     imageRange,
     taggingMode,
+    onlyUntagged,
     previewDockOpen,
   ]);
 
@@ -322,6 +332,17 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       return nextIndex >= 0 ? nextIndex : currentIndex;
     });
   }, [imageEntries]);
+
+  const initialImageNavigatedRef = useRef(false);
+  useEffect(() => {
+    if (!initialImagePath || initialImageNavigatedRef.current) return;
+    if (imageEntries.length === 0) return;
+    const found = imageEntries.find((e) => e.relativePath === initialImagePath);
+    if (found) {
+      openImage(initialImagePath);
+      initialImageNavigatedRef.current = true;
+    }
+  }, [imageEntries, initialImagePath, openImage]);
 
   const toggleDirectoryExpansion = useCallback((path: string) => {
     setExpandedDirs((prev) => {
@@ -476,6 +497,37 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     imagesUnderDirectory,
     selectedImagePaths,
   ]);
+
+  // Reactively compute which images in the current batch scope are untagged.
+  // Runs whenever the scope, target entries, or onlyUntagged toggle changes.
+  // Results drive both the count in the flyout and the sidebar highlight.
+  useEffect(() => {
+    if (!onlyUntagged || batchTaggingTargetEntries.length === 0) {
+      setUntaggedPaths(onlyUntagged ? [] : null);
+      return;
+    }
+    let cancelled = false;
+    const scopePaths = batchTaggingTargetEntries.map((e) => e.relativePath);
+    listUntaggedImagePaths(projectId, scopePaths)
+      .then((untagged) => {
+        if (!cancelled) setUntaggedPaths(untagged);
+      })
+      .catch(() => {
+        if (!cancelled) setUntaggedPaths([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [onlyUntagged, batchTaggingTargetEntries, projectId]);
+
+  /** Derived count used by the preview flyout. */
+  const untaggedCount = untaggedPaths?.length ?? null;
+
+  /** Set for O(1) lookups in the sidebar row renderer. */
+  const untaggedPathSet = useMemo(
+    () => (untaggedPaths ? new Set(untaggedPaths) : null),
+    [untaggedPaths],
+  );
 
   useEffect(() => {
     if (triggerWordScope !== "group") return;
@@ -734,6 +786,21 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         await reloadEntriesPreserveSelection(fresh, null);
         setSelectedImagePaths(new Set());
         setSelectionAnchorPath(null);
+      } catch (e) {
+        setError(t("dataset.groupActionFailed", { error: getErrorMessage(e, "") }));
+      }
+    },
+    [projectId, reloadEntriesPreserveSelection, t],
+  );
+
+  const performSetGroupType = useCallback(
+    async (groupPath: string, groupType: "normal" | "reg") => {
+      setError(null);
+      try {
+        const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+          setDatasetGroupType(projectId, groupPath, groupType),
+        );
+        await reloadEntriesPreserveSelection(fresh, null);
       } catch (e) {
         setError(t("dataset.groupActionFailed", { error: getErrorMessage(e, "") }));
       }
@@ -1254,7 +1321,19 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
       targets = batchTaggingTargetEntries.slice(range.start - 1, range.end);
     }
 
+    // When "only untagged" is active, filter to images that have no caption yet.
+    if (onlyUntagged && targets.length > 0) {
+      const untaggedPaths = new Set(
+        await listUntaggedImagePaths(
+          projectId,
+          targets.map((e) => e.relativePath),
+        ),
+      );
+      targets = targets.filter((e) => untaggedPaths.has(e.relativePath));
+    }
+
     if (targets.length === 0) {
+      setError(t("dataset.batchNoUntagged"));
       return;
     }
 
@@ -1335,6 +1414,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
     imageEntries.length,
     imageRange,
     loadAsset,
+    onlyUntagged,
     projectId,
     taggingMode,
     t,
@@ -1425,6 +1505,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         selectedImagePaths={selectedImagePaths}
         assetRelativePath={asset?.relativePath}
         batchRangeHighlightPaths={batchRangeHighlightPaths}
+        untaggedImagePaths={untaggedPathSet}
         batchProgress={batchProgress}
         onToolbarCreateGroup={() => {
           const paths = Array.from(selectedImagePaths);
@@ -1454,11 +1535,15 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         }}
         onDirectoryRowContextMenu={(ev, relativePath) => {
           ev.preventDefault();
+          const dirEntry = entries.find(
+            (e) => e.kind === "directory" && e.relativePath === relativePath,
+          );
           setContextMenu({
             x: ev.clientX,
             y: ev.clientY,
             targetPath: relativePath,
             targetKind: "directory",
+            targetGroupType: dirEntry?.groupType,
           });
         }}
         onBackgroundContextMenu={(ev) => {
@@ -1494,6 +1579,9 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
         setImageRange={setImageRange}
         busy={busy}
         batchProgress={batchProgress}
+        onlyUntagged={onlyUntagged}
+        setOnlyUntagged={setOnlyUntagged}
+        untaggedCount={untaggedCount}
         apiLogLines={apiLogLines}
         runBatchTagging={runBatchTagging}
         refreshApiLogs={refreshApiLogs}
@@ -1556,6 +1644,7 @@ export default function DatasetEditor({ projectId }: DatasetEditorProps) {
           openCreateGroupDialog,
           performMoveImagesToRoot,
           performRemoveGroup,
+          performSetGroupType,
           setSelectedImagePaths,
           setSelectionAnchorPath,
           setPromptDialog,

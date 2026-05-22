@@ -9,12 +9,17 @@ use std::{
 
 use tauri::State;
 
+use std::collections::HashMap;
+
 use crate::{
     commands::respond,
     db,
     error::{AppError, AppResult},
     llm,
-    models::{DatasetAsset, DatasetEntry, DatasetEntryKind, DatasetPreviewAsset, SampleImageEntry},
+    models::{
+        DatasetAsset, DatasetEntry, DatasetEntryKind, DatasetGroupType, DatasetPreviewAsset,
+        SampleImageEntry,
+    },
     state::AppState,
     utils::{
         cmp_str_natural, ensure_within, hidden_std_command, normalize_display_path,
@@ -73,6 +78,23 @@ pub struct RemoveDatasetGroupInput {
     /// `false`, the call fails if non-image content remains beneath the group.
     #[serde(default)]
     pub delete_contents: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetDatasetGroupTypeInput {
+    pub project_id: String,
+    pub group_relative_path: String,
+    /// "normal" | "reg"
+    pub group_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListUntaggedImagePathsInput {
+    pub project_id: String,
+    /// Dataset-root–relative paths of images to check.
+    pub relative_paths: Vec<String>,
 }
 
 #[tauri::command]
@@ -201,6 +223,23 @@ pub fn remove_dataset_group(
 }
 
 #[tauri::command]
+pub fn set_dataset_group_type(
+    input: SetDatasetGroupTypeInput,
+    state: State<'_, AppState>,
+) -> Result<Vec<DatasetEntry>, String> {
+    respond(set_dataset_group_type_inner(state.inner().clone(), &input))
+}
+
+/// Returns the subset of `relative_paths` whose caption (.txt) is absent or empty.
+#[tauri::command]
+pub fn list_untagged_image_paths(
+    input: ListUntaggedImagePathsInput,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, String> {
+    respond(list_untagged_image_paths_inner(state.inner().clone(), &input))
+}
+
+#[tauri::command]
 pub async fn auto_tag_image(
     project_id: String,
     relative_path: String,
@@ -243,8 +282,11 @@ fn list_dataset_entries_inner(state: AppState, project_id: &str) -> AppResult<Ve
         return Ok(Vec::new());
     }
 
+    let group_types =
+        state.with_db(|connection| db::load_dataset_group_types(connection, project_id))?;
+
     let mut entries = Vec::new();
-    visit_dataset(&dataset_root, &dataset_root, 0, &mut entries)?;
+    visit_dataset(&dataset_root, &dataset_root, 0, &mut entries, &group_types)?;
     entries.sort_by(|left, right| {
         cmp_str_natural(&left.relative_path, &right.relative_path)
     });
@@ -695,7 +737,20 @@ fn rename_dataset_group_inner(
         )));
     }
 
+    // Derive old/new relative paths from the input string — avoids canonicalize on
+    // the not-yet-existing target path.
+    let old_relative = input.group_relative_path.trim_matches('/').to_string();
+    let new_relative = match old_relative.rfind('/') {
+        Some(idx) => format!("{}/{sanitized}", &old_relative[..idx]),
+        None => sanitized.clone(),
+    };
+
     fs::rename(&group_path, &target)?;
+
+    state.with_db(|connection| {
+        db::rename_dataset_group_config(connection, &input.project_id, &old_relative, &new_relative)
+    })?;
+
     list_dataset_entries_inner(state, &input.project_id)
 }
 
@@ -724,8 +779,13 @@ fn remove_dataset_group_inner(
         .ok_or_else(|| AppError::Validation("Group has no parent directory.".to_string()))?
         .to_path_buf();
 
+    let group_relative = input.group_relative_path.trim_matches('/').to_string();
+
     if input.delete_contents {
         fs::remove_dir_all(&group_path)?;
+        let _ = state.with_db(|connection| {
+            db::remove_dataset_group_configs(connection, &input.project_id, &group_relative)
+        });
         return list_dataset_entries_inner(state, &input.project_id);
     }
 
@@ -753,13 +813,20 @@ fn remove_dataset_group_inner(
     // Try to remove the now-empty group; if anything is left behind (e.g. caption
     // orphans, non-image files, nested folders) surface a clear error so the user
     // can clean up manually instead of silently keeping the group around.
-    match fs::remove_dir(&group_path) {
-        Ok(()) => list_dataset_entries_inner(state, &input.project_id),
+    let result = match fs::remove_dir(&group_path) {
+        Ok(()) => Ok(()),
         Err(_) if has_other => Err(AppError::Validation(
             "Group still contains non-image content. Re-run with deleteContents=true to remove it.".to_string(),
         )),
         Err(err) => Err(err.into()),
-    }
+    };
+    result?;
+
+    state.with_db(|connection| {
+        db::remove_dataset_group_configs(connection, &input.project_id, &group_relative)
+    })?;
+
+    list_dataset_entries_inner(state, &input.project_id)
 }
 
 async fn generate_caption_inner(
@@ -968,6 +1035,7 @@ fn visit_dataset(
     current: &Path,
     depth: u32,
     entries: &mut Vec<DatasetEntry>,
+    group_types: &HashMap<String, String>,
 ) -> AppResult<()> {
     for entry in fs::read_dir(current)? {
         let entry = entry?;
@@ -977,19 +1045,24 @@ fn visit_dataset(
         let file_type = entry.file_type()?;
 
         if file_type.is_dir() {
+            let group_type = group_types
+                .get(&relative)
+                .map(|s| DatasetGroupType::from_str(s));
             entries.push(DatasetEntry {
                 relative_path: relative.clone(),
                 name,
                 kind: DatasetEntryKind::Directory,
                 depth,
+                group_type,
             });
-            visit_dataset(root, &path, depth + 1, entries)?;
+            visit_dataset(root, &path, depth + 1, entries, group_types)?;
         } else if is_image_file(&path) {
             entries.push(DatasetEntry {
                 relative_path: relative,
                 name,
                 kind: DatasetEntryKind::Image,
                 depth,
+                group_type: None,
             });
         } else {
             entries.push(DatasetEntry {
@@ -997,6 +1070,7 @@ fn visit_dataset(
                 name,
                 kind: DatasetEntryKind::File,
                 depth,
+                group_type: None,
             });
         }
     }
@@ -1051,6 +1125,62 @@ fn read_caption_file(path: &Path) -> AppResult<String> {
     } else {
         Ok(String::new())
     }
+}
+
+fn list_untagged_image_paths_inner(
+    state: AppState,
+    input: &ListUntaggedImagePathsInput,
+) -> AppResult<Vec<String>> {
+    let project = state.with_db(|connection| db::get_project(connection, &input.project_id))?;
+    let dataset_root = PathBuf::from(project.dataset_path);
+
+    let mut untagged = Vec::new();
+    for rel_path in &input.relative_paths {
+        let image_path = match resolve_dataset_path(&dataset_root, rel_path) {
+            Ok(p) => p,
+            Err(_) => {
+                untagged.push(rel_path.clone());
+                continue;
+            }
+        };
+        let caption_path = caption_path_for_image(&image_path);
+        let has_caption = caption_path.exists()
+            && fs::read_to_string(&caption_path)
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+        if !has_caption {
+            untagged.push(rel_path.clone());
+        }
+    }
+    Ok(untagged)
+}
+
+fn set_dataset_group_type_inner(
+    state: AppState,
+    input: &SetDatasetGroupTypeInput,
+) -> AppResult<Vec<DatasetEntry>> {
+    let project = state.with_db(|connection| db::get_project(connection, &input.project_id))?;
+    let dataset_root = PathBuf::from(project.dataset_path);
+    let group_path = resolve_dataset_path(&dataset_root, &input.group_relative_path)?;
+    if !group_path.is_dir() {
+        return Err(AppError::Validation(format!(
+            "'{}' is not a group folder.",
+            input.group_relative_path
+        )));
+    }
+    let group_type = match input.group_type.as_str() {
+        "reg" => "reg",
+        _ => "normal",
+    };
+    state.with_db(|connection| {
+        db::save_dataset_group_type(
+            connection,
+            &input.project_id,
+            &input.group_relative_path,
+            group_type,
+        )
+    })?;
+    list_dataset_entries_inner(state, &input.project_id)
 }
 
 fn is_image_file(path: &Path) -> bool {

@@ -1,5 +1,6 @@
-import { Edit3, FolderInput, FolderMinus, FolderPlus, FolderX, X } from "lucide-react";
+import { Edit3, FolderInput, FolderMinus, FolderPlus, FolderX, ShieldCheck, X } from "lucide-react";
 import type { TranslateFn } from "../../../lib/i18n";
+import type { DatasetGroupType } from "../../../lib/types";
 import type { DatasetContextMenuItem } from "./DatasetContextMenu";
 import { parentRelativePath } from "./datasetTree";
 
@@ -14,12 +15,15 @@ export function buildDatasetContextMenuItems(args: {
     y: number;
     targetPath: string;
     targetKind: "image" | "directory" | "background";
+    /** Present when targetKind === "directory" */
+    targetGroupType?: DatasetGroupType;
   } | null;
   selectedImagePaths: Set<string>;
   imagesUnderDirectory: (dirPath: string) => string[];
   openCreateGroupDialog: (initialPaths: string[], parentPath: string | null) => boolean;
   performMoveImagesToRoot: (paths: string[]) => Promise<void> | void;
   performRemoveGroup: (groupPath: string, deleteContents: boolean) => Promise<void> | void;
+  performSetGroupType: (groupPath: string, groupType: DatasetGroupType) => Promise<void> | void;
   setSelectedImagePaths: (next: Set<string>) => void;
   setSelectionAnchorPath: (next: string | null) => void;
   setPromptDialog: (
@@ -35,6 +39,7 @@ export function buildDatasetContextMenuItems(args: {
     openCreateGroupDialog,
     performMoveImagesToRoot,
     performRemoveGroup,
+    performSetGroupType,
     setSelectedImagePaths,
     setSelectionAnchorPath,
     setPromptDialog,
@@ -95,6 +100,9 @@ export function buildDatasetContextMenuItems(args: {
     const dirPath = contextMenu.targetPath;
     const dirName = dirPath.split("/").pop() ?? dirPath;
     const innerImages = imagesUnderDirectory(dirPath);
+    const currentGroupType = contextMenu.targetGroupType ?? "normal";
+    const isReg = currentGroupType === "reg";
+
     items.push({
       key: "rename-group",
       icon: <Edit3 size={13} aria-hidden />,
@@ -115,6 +123,16 @@ export function buildDatasetContextMenuItems(args: {
       disabled: busy !== null || innerImages.length === 0,
       onSelect: () => {
         openCreateGroupDialog(innerImages, dirPath);
+      },
+    });
+    // Toggle: set to reg or back to normal
+    items.push({
+      key: "toggle-reg-group",
+      icon: <ShieldCheck size={13} aria-hidden />,
+      label: isReg ? t("dataset.groupTypeSetNormal") : t("dataset.groupTypeSetReg"),
+      disabled: busy !== null,
+      onSelect: () => {
+        void performSetGroupType(dirPath, isReg ? "normal" : "reg");
       },
     });
     items.push({

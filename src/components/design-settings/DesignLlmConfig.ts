@@ -156,6 +156,37 @@ export function inferLlmPromptPresetSelection(
   return LLM_PROMPT_AD_HOC;
 }
 
+const BUILTIN_PROMPT_IDS = new Set([
+  BUILTIN_PROMPT_FOLLOW_UI,
+  BUILTIN_PROMPT_EN,
+  BUILTIN_PROMPT_ZH_CN,
+  BUILTIN_PROMPT_ANIME_SD,
+  BUILTIN_PROMPT_STYLE_LORA,
+  LLM_PROMPT_AD_HOC,
+]);
+
+export function isKnownLlmPromptPresetId(
+  id: string | undefined | null,
+  customPresets: Array<{ id: string }>,
+): boolean {
+  if (!id) return false;
+  if (BUILTIN_PROMPT_IDS.has(id)) return true;
+  return customPresets.some((p) => p.id === id);
+}
+
+/** Prefer persisted preset id; fall back to inferring from prompt text. */
+export function resolveLlmPromptPresetSelection(
+  loadedId: string | undefined,
+  prompt: string,
+  language: SupportedLanguage,
+  customPresets: Array<{ id: string; systemPrompt: string }>,
+): string {
+  if (isKnownLlmPromptPresetId(loadedId, customPresets)) {
+    return loadedId!;
+  }
+  return inferLlmPromptPresetSelection(prompt, language, customPresets);
+}
+
 export function createDefaultLlmSettings(language: SupportedLanguage): LlmSettings {
   return {
     endpointUrl: DEFAULT_LLM_ENDPOINT,
@@ -171,5 +202,6 @@ export function createDefaultLlmSettings(language: SupportedLanguage): LlmSettin
     reasoningBudget: 0,
     reasoningEffort: "default",
     priorCaptionMode: "injectAsConversation",
+    systemPromptPresetId: BUILTIN_PROMPT_FOLLOW_UI,
   };
 }

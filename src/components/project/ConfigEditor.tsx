@@ -25,20 +25,23 @@ import {
   createUserTrainingPreset,
   isStyleArtistPresetId,
   loadCustomPresetsFromStorage,
+  resolveTrainingPresetSelection,
   saveCustomPresetsToStorage,
+  saveTrainingPresetSelection,
   type TrainingPreset,
 } from "../../lib/presets";
 import { readTextFile, writeTextFile } from "../../lib/desktopApi";
 import { PresetDropdownMenu, type PresetMenuGroup } from "../PresetDropdownMenu";
 
 interface ConfigEditorProps {
+  projectId: string;
   config: TrainingConfig;
   onChange: (next: TrainingConfig) => void;
 }
 
 type TabKey = "basic" | "advanced" | "expert";
 
-export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
+export default function ConfigEditor({ projectId, config, onChange }: ConfigEditorProps) {
   const { t, language } = useI18n();
   const [activeTab, setActiveTab] = useState<TabKey>("basic");
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
@@ -53,6 +56,11 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
     () => [...DEFAULT_PRESETS, ...customPresets],
     [customPresets],
   );
+
+  useEffect(() => {
+    const validIds = allPresets.map((p) => p.id);
+    setSelectedPresetId(resolveTrainingPresetSelection(projectId, "sd-scripts", validIds));
+  }, [projectId, allPresets]);
 
   const trainingPresetMenuGroups = useMemo((): PresetMenuGroup[] => {
     const groups: PresetMenuGroup[] = PRESET_GROUPS.map((group) => ({
@@ -98,6 +106,7 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
     setCustomPresets(nextList);
     saveCustomPresetsToStorage(nextList);
     setSelectedPresetId(nextPreset.id);
+    saveTrainingPresetSelection(projectId, "sd-scripts", nextPreset.id);
     setSavePresetOpen(false);
     setSavePresetName("");
     setPresetError(null);
@@ -230,6 +239,7 @@ export default function ConfigEditor({ config, onChange }: ConfigEditorProps) {
             value={selectedPresetId}
             onChange={(v) => {
               setSelectedPresetId(v);
+              saveTrainingPresetSelection(projectId, "sd-scripts", v);
               setPresetError(null);
             }}
             placeholder={t("config.presetPlaceholder")}

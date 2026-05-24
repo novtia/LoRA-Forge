@@ -13,8 +13,9 @@
 //! * `ContentFiltered` / `HttpClient` / `Validation` / `Cancelled` → 立即返回，不重试。
 //! * `HttpServer` / `Network` / `Parse` → 指数回退后重试 `caption_retry_max` 次。
 
-mod profile;
 mod caption_tools;
+pub mod models_list;
+mod profile;
 
 use std::{
     fs,
@@ -33,7 +34,6 @@ use serde_json::{json, Map, Value};
 use tokio::time::sleep;
 
 use crate::{
-    db,
     error::{AppError, AppResult},
     models::{CaptionTagMode, EndpointKind, LlmSettings, PriorCaptionMode},
     state::AppState,
@@ -44,8 +44,8 @@ const AUTO_TAG_PROMPT: &str = "Generate a concise, training-ready caption for th
 const MODIFY_CAPTION_SYSTEM_PROMPT: &str = "You edit Danbooru-style comma-separated training captions for Stable Diffusion / LoRA datasets. \
 The user provides the current caption and natural-language edit instructions. \
 You MUST apply changes ONLY by calling the provided tools (add_tags, remove_tags, replace_tag, set_caption). \
-Do not output markdown or explanations. After tool calls the system returns the updated caption. \
-When the caption matches the user's intent, stop calling tools.";
+Do not output markdown or explanations in the final message. After tool calls the system returns the updated caption. \
+When the caption matches the user's intent, stop calling tools — do not send a summary or confirmation text.";
 const MAX_CAPTION_TOOL_ROUNDS: usize = 8;
 /// Keeps multimodal payloads small; omit prior turn if exceeding this character count after trim.
 const MAX_PREVIOUS_ASSISTANT_CHARS: usize = 12_000;
@@ -57,7 +57,7 @@ const HTTP_POOL_IDLE_SECS: u64 = 90;
 const USER_AGENT_VALUE: &str = concat!("lora-forge/", env!("CARGO_PKG_VERSION"));
 
 /// 全局共享的 HTTP 客户端，避免每个请求都重建 TLS / 连接池。
-fn shared_http_client() -> &'static Client {
+pub(crate) fn shared_http_client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         Client::builder()
@@ -149,14 +149,7 @@ fn compose_modify_user_prompt(
 }
 
 fn persist_model_as_text_only(log_sink: &AppState, model_id: &str) -> AppResult<()> {
-    log_sink.with_db(|connection| {
-        let mut settings = db::load_llm_settings(connection)?;
-        if settings.text_only_model_ids.iter().any(|id| id == model_id) {
-            return Ok(());
-        }
-        settings.text_only_model_ids.push(model_id.to_string());
-        db::save_llm_settings(connection, &settings)
-    })
+    log_sink.with_db(|connection| crate::db::mark_model_text_only_in_global(connection, model_id))
 }
 
 /// 若上游拒绝图片输入：记录 model_id 为纯文本，并立即无图重试一次。
@@ -495,6 +488,7 @@ async fn modify_dataset_caption_once(
 
     let mut working_caption = initial_caption.trim().to_string();
     let tools = caption_tools::caption_edit_tool_definitions();
+    let mut tools_applied = false;
 
     for round in 0..MAX_CAPTION_TOOL_ROUNDS {
         if cancel.load(Ordering::SeqCst) {
@@ -541,6 +535,10 @@ async fn modify_dataset_caption_once(
 
         let tool_calls = caption_tools::extract_tool_calls(&payload);
         if tool_calls.is_empty() {
+            // 工具已执行过后，模型常会再发一段说明文字；应返回工具产出的 caption，而非说明。
+            if tools_applied {
+                return Ok(sanitize_caption(&working_caption));
+            }
             if let Some(text) = extract_user_visible_caption(&payload)
                 .as_deref()
                 .map(sanitize_caption)
@@ -556,6 +554,7 @@ async fn modify_dataset_caption_once(
             return Ok(sanitize_caption(&working_caption));
         }
 
+        tools_applied = true;
         let assistant_message = payload
             .pointer("/choices/0/message")
             .cloned()

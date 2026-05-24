@@ -190,6 +190,46 @@ export type LlmPriorCaptionMode =
 /** Single-image LLM tagging interaction mode. */
 export type CaptionTagMode = "direct" | "conversationModify";
 
+export type LlmModelSource = "manual" | "fetched";
+
+export interface LlmProviderModelEntry {
+  id: string;
+  modelId: string;
+  label?: string | null;
+  source?: LlmModelSource;
+}
+
+export interface LlmProviderSummary {
+  id: string;
+  name: string;
+  endpointUrl: string;
+  endpointKind: LlmEndpointKind;
+  models: LlmProviderModelEntry[];
+  hasApiKey: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LlmProvider extends Omit<LlmProviderSummary, "hasApiKey"> {
+  apiKey: string;
+}
+
+export interface LlmGlobalSettings {
+  activeProviderId: string;
+  activeModelId: string;
+  systemPrompt: string;
+  temperature: number;
+  maxTokens: number;
+  captionRetryMax: number;
+  thinkingEnabled: boolean;
+  maxCompletionTokens?: number;
+  reasoningBudget?: number;
+  reasoningEffort?: LlmReasoningEffort;
+  priorCaptionMode?: LlmPriorCaptionMode;
+  systemPromptPresetId?: string;
+  textOnlyModelIds?: string[];
+}
+
 export interface LlmSettings {
   endpointUrl: string;
   apiKey: string;
@@ -220,6 +260,12 @@ export interface LlmSettings {
   reasoningEffort?: LlmReasoningEffort;
   /** Prior-caption injection strategy; defaults to `off`. */
   priorCaptionMode?: LlmPriorCaptionMode;
+  /** Selected system-prompt preset row id (builtin/custom/ad-hoc). */
+  systemPromptPresetId?: string;
+  /** Active LLM provider id (effective settings). */
+  activeProviderId?: string;
+  /** Models that rejected image input; matched by modelId string. */
+  textOnlyModelIds?: string[];
 }
 
 /** Baidu FanYi / translate open platform (stored locally in app DB). */

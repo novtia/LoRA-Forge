@@ -3,6 +3,7 @@ mod db;
 mod error;
 mod hardware;
 mod llm;
+mod llm_provider_db;
 mod models;
 mod state;
 mod trainer;
@@ -32,6 +33,16 @@ pub fn run() {
             commands::config::save_training_env,
             commands::config::load_llm_settings,
             commands::config::save_llm_settings,
+            commands::llm_provider::list_llm_providers,
+            commands::llm_provider::get_llm_provider,
+            commands::llm_provider::create_llm_provider,
+            commands::llm_provider::update_llm_provider,
+            commands::llm_provider::delete_llm_provider,
+            commands::llm_provider::add_llm_provider_model,
+            commands::llm_provider::update_llm_provider_model,
+            commands::llm_provider::delete_llm_provider_model,
+            commands::llm_provider::fetch_llm_provider_models,
+            commands::llm_provider::set_active_llm_selection,
             commands::baidu_translate::load_baidu_translate_settings,
             commands::baidu_translate::save_baidu_translate_settings,
             commands::baidu_translate::baidu_translate,

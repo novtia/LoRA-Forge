@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   Bot,
@@ -22,11 +22,11 @@ import {
   DEFAULT_LLM_MAX_TOKENS,
   DEFAULT_LLM_CAPTION_RETRY_MAX,
   getDefaultSystemPrompt,
-  inferLlmPromptPresetSelection,
-  LLM_CONNECTION_FIELDS,
   LLM_PROMPT_AD_HOC,
+  resolveLlmPromptPresetSelection,
   resolveSystemPrompt,
 } from "./DesignLlmConfig";
+import { DesignLlmProviderPanel } from "./DesignLlmProviderPanel";
 import { loadBaiduTranslateSettings, loadLlmSettings, readTextFile, saveBaiduTranslateSettings, saveLlmSettings, writeTextFile } from "../../lib/desktopApi";
 import {
   applyLlmPromptPresetToSettings,
@@ -128,6 +128,34 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
   const [savePresetError, setSavePresetError] = useState<string | null>(null);
   const [presetMessage, setPresetMessage] = useState<string | null>(null);
 
+  const mergeSavedLlmSettings = (saved: LlmSettings, selectionId: string): LlmSettings => ({
+    ...createDefaultLlmSettings(language),
+    ...saved,
+    systemPrompt: resolveSystemPrompt(saved.systemPrompt, language),
+    captionRetryMax:
+      typeof saved.captionRetryMax === "number" && !Number.isNaN(saved.captionRetryMax)
+        ? Math.min(20, Math.max(0, saved.captionRetryMax))
+        : DEFAULT_LLM_CAPTION_RETRY_MAX,
+    thinkingEnabled: typeof saved.thinkingEnabled === "boolean" ? saved.thinkingEnabled : false,
+    endpointKind: normalizeEndpointKind(saved.endpointKind),
+    maxCompletionTokens: normalizeNonNegativeInt(saved.maxCompletionTokens),
+    reasoningBudget: normalizeNonNegativeInt(saved.reasoningBudget),
+    reasoningEffort: normalizeReasoningEffort(saved.reasoningEffort),
+    priorCaptionMode: normalizePriorCaptionMode(saved.priorCaptionMode),
+    systemPromptPresetId: selectionId,
+    activeProviderId: saved.activeProviderId ?? "",
+    textOnlyModelIds: saved.textOnlyModelIds ?? [],
+  });
+
+  const persistPromptPresetSettings = async (nextSettings: LlmSettings) => {
+    try {
+      const saved = await saveLlmSettings(nextSettings);
+      setSettings(mergeSavedLlmSettings(saved, nextSettings.systemPromptPresetId ?? LLM_PROMPT_AD_HOC));
+    } catch {
+      // keep in-memory selection even if background save fails
+    }
+  };
+
   const llmPresetMenuGroups = useMemo((): PresetMenuGroup[] => {
     const groups: PresetMenuGroup[] = [
       {
@@ -152,17 +180,6 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     });
     return groups;
   }, [customPresets, t]);
-
-  const endpointKindMenuGroups = useMemo((): PresetMenuGroup[] => [
-    {
-      items: [
-        { id: "auto", label: t("design.llmEndpointKindAuto") },
-        { id: "openAi", label: t("design.llmEndpointKindOpenAi") },
-        { id: "openRouter", label: t("design.llmEndpointKindOpenRouter") },
-        { id: "anthropicCompat", label: t("design.llmEndpointKindAnthropic") },
-      ],
-    },
-  ], [t]);
 
   const reasoningEffortMenuGroups = useMemo((): PresetMenuGroup[] => [
     {
@@ -200,27 +217,30 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
         const lang = languageRef.current;
         const resolvedPrompt = resolveSystemPrompt(loaded.systemPrompt, lang);
         const initialCustom = loadCustomLlmPromptPresets();
+        const resolvedSelection = resolveLlmPromptPresetSelection(
+          loaded.systemPromptPresetId,
+          resolvedPrompt,
+          lang,
+          initialCustom,
+        );
         setCustomPresets(initialCustom);
-        setSettings({
-          ...createDefaultLlmSettings(lang),
-          ...loaded,
-          systemPrompt: resolvedPrompt,
-          captionRetryMax:
-            typeof loaded.captionRetryMax === "number" && !Number.isNaN(loaded.captionRetryMax)
-              ? Math.min(20, Math.max(0, loaded.captionRetryMax))
-              : DEFAULT_LLM_CAPTION_RETRY_MAX,
-          thinkingEnabled: typeof loaded.thinkingEnabled === "boolean" ? loaded.thinkingEnabled : false,
-          endpointKind: normalizeEndpointKind(loaded.endpointKind),
-          maxCompletionTokens: normalizeNonNegativeInt(loaded.maxCompletionTokens),
-          reasoningBudget: normalizeNonNegativeInt(loaded.reasoningBudget),
-          reasoningEffort: normalizeReasoningEffort(loaded.reasoningEffort),
-          priorCaptionMode: normalizePriorCaptionMode(loaded.priorCaptionMode),
-        });
+        const mergedSettings = mergeSavedLlmSettings(
+          {
+            ...createDefaultLlmSettings(lang),
+            ...loaded,
+            systemPrompt: resolvedPrompt,
+          },
+          resolvedSelection,
+        );
+        setSettings(mergedSettings);
         setBaiduSettings({
           ...createDefaultBaiduTranslateSettings(),
           ...baiduLoaded,
         });
-        setPromptPresetSelection(inferLlmPromptPresetSelection(resolvedPrompt, lang, initialCustom));
+        setPromptPresetSelection(resolvedSelection);
+        if (!loaded.systemPromptPresetId?.trim()) {
+          void persistPromptPresetSettings(mergedSettings);
+        }
       })
       .catch((error) => {
         if (cancelled) return;
@@ -261,27 +281,11 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     setFeedback(null);
   };
 
-  const handleSave = async () => {
+  const handleSaveConnection = async () => {
     try {
       setBusyState("saving");
       setFeedback(null);
-      const saved = await saveLlmSettings(settings);
       await saveBaiduTranslateSettings(baiduSettings);
-      setSettings((current) => ({
-        ...current,
-        ...saved,
-        systemPrompt: resolveSystemPrompt(saved.systemPrompt, language),
-        captionRetryMax:
-          typeof saved.captionRetryMax === "number" && !Number.isNaN(saved.captionRetryMax)
-            ? Math.min(20, Math.max(0, saved.captionRetryMax))
-            : DEFAULT_LLM_CAPTION_RETRY_MAX,
-        thinkingEnabled: typeof saved.thinkingEnabled === "boolean" ? saved.thinkingEnabled : false,
-        endpointKind: normalizeEndpointKind(saved.endpointKind),
-        maxCompletionTokens: normalizeNonNegativeInt(saved.maxCompletionTokens),
-        reasoningBudget: normalizeNonNegativeInt(saved.reasoningBudget),
-        reasoningEffort: normalizeReasoningEffort(saved.reasoningEffort),
-        priorCaptionMode: normalizePriorCaptionMode(saved.priorCaptionMode),
-      }));
       setFeedback(t("design.connectionSaved"));
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : t("errors.saveLlmSettings"));
@@ -290,28 +294,71 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     }
   };
 
+  const handleSave = async () => {
+    try {
+      setBusyState("saving");
+      setFeedback(null);
+      const payload = { ...settings, systemPromptPresetId: promptPresetSelection };
+      const saved = await saveLlmSettings(payload);
+      setSettings(mergeSavedLlmSettings(saved, promptPresetSelection));
+      setFeedback(t("design.connectionSaved"));
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : t("errors.saveLlmSettings"));
+    } finally {
+      setBusyState(null);
+    }
+  };
+
+  const handleEffectiveProviderChange = useCallback((patch: Partial<LlmSettings>) => {
+    setSettings((current) => ({
+      ...current,
+      ...patch,
+    }));
+  }, []);
+
   const handlePresetSelectChange = (value: string) => {
     setPresetMessage(null);
     if (value === LLM_PROMPT_AD_HOC) {
       setPromptPresetSelection(LLM_PROMPT_AD_HOC);
+      setSettings((current) => {
+        const next = { ...current, systemPromptPresetId: LLM_PROMPT_AD_HOC };
+        void persistPromptPresetSettings(next);
+        return next;
+      });
       return;
     }
     const builtin = applyBuiltinPromptSelection(value, language);
     if (builtin !== null) {
       setPromptPresetSelection(value);
-      setSettings((current) => ({ ...current, systemPrompt: builtin }));
+      setSettings((current) => {
+        const next = { ...current, systemPrompt: builtin, systemPromptPresetId: value };
+        void persistPromptPresetSettings(next);
+        return next;
+      });
       return;
     }
     const preset = customPresets.find((p) => p.id === value);
     if (preset) {
       setPromptPresetSelection(value);
-      setSettings((current) => applyLlmPromptPresetToSettings(current, preset));
+      setSettings((current) => {
+        const next = applyLlmPromptPresetToSettings(
+          { ...current, systemPromptPresetId: value },
+          preset,
+        );
+        void persistPromptPresetSettings(next);
+        return next;
+      });
     }
   };
 
   const handleSystemPromptChange = (text: string) => {
-    updateSetting("systemPrompt", text);
+    setSettings((current) => ({
+      ...current,
+      systemPrompt: text,
+      systemPromptPresetId: LLM_PROMPT_AD_HOC,
+    }));
     setPromptPresetSelection(LLM_PROMPT_AD_HOC);
+    setFeedback(null);
     setPresetMessage(null);
   };
 
@@ -331,6 +378,14 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     setCustomPresets(nextList);
     saveCustomLlmPromptPresets(nextList);
     setPromptPresetSelection(nextPreset.id);
+    setSettings((current) => {
+      const next = applyLlmPromptPresetToSettings(
+        { ...current, systemPromptPresetId: nextPreset.id },
+        nextPreset,
+      );
+      void persistPromptPresetSettings(next);
+      return next;
+    });
     setSavePresetOpen(false);
     setSavePresetName("");
     setPresetMessage(t("design.llmPresetSaved"));
@@ -344,7 +399,15 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
     saveCustomLlmPromptPresets(nextList);
     const followPrompt = getDefaultSystemPrompt(language);
     setPromptPresetSelection(BUILTIN_PROMPT_FOLLOW_UI);
-    setSettings((current) => ({ ...current, systemPrompt: followPrompt }));
+    setSettings((current) => {
+      const next = {
+        ...current,
+        systemPrompt: followPrompt,
+        systemPromptPresetId: BUILTIN_PROMPT_FOLLOW_UI,
+      };
+      void persistPromptPresetSettings(next);
+      return next;
+    });
     setPresetMessage(t("design.llmPresetDeleted"));
   };
 
@@ -424,32 +487,14 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
               </span>
             </div>
             <div className="design-llm-pane-body">
-              {LLM_CONNECTION_FIELDS.map((field) => {
-                const Icon = field.icon;
-
-                return (
-                  <div key={field.id} className="form-group">
-                    <label className="form-label">
-                      <Icon
-                        size={14}
-                        style={{ marginRight: "0.5rem", display: "inline-block", verticalAlign: "middle" }}
-                      />
-                      {t(field.labelKey)}
-                    </label>
-                    <input
-                      type={field.inputType}
-                      className="form-input"
-                      placeholder={field.placeholder}
-                      value={settings[field.field]}
-                      onChange={(event) => updateSetting(field.field, event.target.value)}
-                      disabled={loading}
-                    />
-                    <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: "0.25rem" }}>
-                      {t(field.descriptionKey)}
-                    </div>
-                  </div>
-                );
-              })}
+              <DesignLlmProviderPanel
+                t={t}
+                disabled={loading}
+                activeProviderId={settings.activeProviderId ?? ""}
+                activeModelId={settings.modelId}
+                onEffectiveChange={handleEffectiveProviderChange}
+                onFeedback={setFeedback}
+              />
 
               <div
                 style={{
@@ -499,8 +544,8 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
               </div>
 
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "1rem" }}>
-                <button type="button" className="btn" onClick={() => void handleSave()} disabled={busyState !== null}>
-                  {saving ? t("common.saving") : t("design.saveConnection")}
+                <button type="button" className="btn" onClick={() => void handleSaveConnection()} disabled={busyState !== null}>
+                  {saving ? t("common.saving") : t("design.saveBaiduTranslate")}
                 </button>
               </div>
               {feedback ? (
@@ -713,33 +758,6 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
                 disabled={loading}
                 onToggle={() => updateSetting("thinkingEnabled", !settings.thinkingEnabled)}
               />
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    fontWeight: "bold",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    color: "var(--text-muted)",
-                  }}
-                >
-                  {t("design.llmEndpointKind")}
-                </div>
-                <PresetDropdownMenu
-                  value={settings.endpointKind ?? "auto"}
-                  onChange={(id) =>
-                    updateSetting("endpointKind", normalizeEndpointKind(id))
-                  }
-                  placeholder={t("design.llmEndpointKindAuto")}
-                  groups={endpointKindMenuGroups}
-                  disabled={loading}
-                  block
-                />
-                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
-                  {t("design.llmEndpointKindDesc")}
-                </div>
-              </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                 <div

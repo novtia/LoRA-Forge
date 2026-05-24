@@ -132,6 +132,5 @@ fn save_llm_settings_inner(state: AppState, settings: LlmSettings) -> AppResult<
     settings.validate().map_err(AppError::Validation)?;
 
     state.with_db(|connection| db::save_llm_settings(connection, &settings))?;
-
-    Ok(settings)
+    state.with_db(db::load_llm_settings)
 }

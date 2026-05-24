@@ -22,6 +22,7 @@ import TranslatedCaptionEditor, {
   type TranslatedCaptionEditorHighlight,
 } from "../TranslatedCaptionEditor";
 import { TriggerPositionPicker } from "./TriggerPositionPicker";
+import { DatasetEditorLlmSelection } from "./DatasetEditorLlmSelection";
 
 type Props = {
   asset: DatasetAsset | null;
@@ -30,8 +31,10 @@ type Props = {
   onAutoTag: () => Promise<void>;
   llmTagMode: CaptionTagMode;
   setLlmTagMode: (v: CaptionTagMode) => void;
-  llmUserHint: string;
-  setLlmUserHint: (v: string) => void;
+  llmDirectTagHint: string;
+  setLlmDirectTagHint: (v: string) => void;
+  llmConversationHint: string;
+  setLlmConversationHint: (v: string) => void;
   triggerWord: string;
   setTriggerWord: (v: string) => void;
   triggerWordScope: DatasetEditorTriggerScope;
@@ -70,8 +73,10 @@ export function DatasetEditorCaptionsCard({
   onAutoTag,
   llmTagMode,
   setLlmTagMode,
-  llmUserHint,
-  setLlmUserHint,
+  llmDirectTagHint,
+  setLlmDirectTagHint,
+  llmConversationHint,
+  setLlmConversationHint,
   triggerWord,
   setTriggerWord,
   triggerWordScope,
@@ -104,6 +109,8 @@ export function DatasetEditorCaptionsCard({
 }: Props) {
   const { t } = useI18n();
   const isConversation = llmTagMode === "conversationModify";
+  const hintValue = isConversation ? llmConversationHint : llmDirectTagHint;
+  const setHintValue = isConversation ? setLlmConversationHint : setLlmDirectTagHint;
 
   const applyTriggerTitle = useMemo(() => {
     const n = triggerTargetCount;
@@ -170,6 +177,7 @@ export function DatasetEditorCaptionsCard({
             <StopCircle size={20} aria-hidden />
           </button>
         </div>
+        <DatasetEditorLlmSelection disabled={busy !== null} />
         <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
           <label className="form-label">{t("dataset.llmTagMode")}</label>
           <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
@@ -245,9 +253,9 @@ export function DatasetEditorCaptionsCard({
                 ? t("dataset.llmUserHintPlaceholderConversation")
                 : t("dataset.llmUserHintPlaceholder")
             }
-            value={llmUserHint}
+            value={hintValue}
             disabled={busy !== null}
-            onChange={(e) => setLlmUserHint(e.target.value)}
+            onChange={(e) => setHintValue(e.target.value)}
             spellCheck
           />
           <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>

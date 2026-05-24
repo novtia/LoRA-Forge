@@ -94,13 +94,18 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const [triggerWordScope, setTriggerWordScope] = useState<DatasetEditorTriggerScope>("all");
   /** Folder path when `triggerWordScope === "group"`; "" = images at dataset root only. */
   const [triggerWordGroupPath, setTriggerWordGroupPath] = useState("");
-  /** Optional text sent to the LLM with the image to reduce mis-tags. */
-  const [llmUserHint, setLlmUserHint] = useState("");
+  /** Optional notes for direct LLM auto-tagging. */
+  const [llmDirectTagHint, setLlmDirectTagHint] = useState("");
+  /** Edit instruction for conversation modify mode. */
+  const [llmConversationHint, setLlmConversationHint] = useState("");
   /** Single-image LLM mode: direct tagging vs conversation modify. */
   const [llmTagMode, setLlmTagMode] = useState<CaptionTagMode>("direct");
   const [styleTrainingCaptions, setStyleTrainingCaptions] = useState(false);
   /** Avoid writing another project's form snapshot before hydrate completes (projectId switch). */
   const [persistReadyProjectId, setPersistReadyProjectId] = useState<string | null>(null);
+  /** Restored from localStorage on projectId change; used once when imageEntries first loads. */
+  const lastRestoredImagePathRef = useRef<string | null>(null);
+  const initialImageNavigatedRef = useRef(false);
   const captionRef = useRef(caption);
   captionRef.current = caption;
 
@@ -183,7 +188,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
   useEffect(() => {
     const saved = loadDatasetEditorFormPersist(projectId);
-    setLlmUserHint(saved?.llmUserHint ?? "");
+    setLlmDirectTagHint(saved?.llmDirectTagHint ?? "");
+    setLlmConversationHint(saved?.llmConversationHint ?? "");
     setLlmTagMode(saved?.llmTagMode === "conversationModify" ? "conversationModify" : "direct");
     setTriggerWord(saved?.triggerWord ?? "");
     setTriggerWordPosition(saved?.triggerWordPosition ?? "");
@@ -195,6 +201,9 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     setTaggingMode(saved?.taggingMode === "range" ? "range" : "all");
     setOnlyUntagged(Boolean(saved?.onlyUntagged));
     setPreviewDockOpen(Boolean(saved?.previewDockOpen));
+    lastRestoredImagePathRef.current = saved?.lastImageRelativePath?.trim() || null;
+    initialImageNavigatedRef.current = false;
+    setSelectedImageIndex(-1);
     setPersistReadyProjectId(projectId);
   }, [projectId]);
 
@@ -218,8 +227,14 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
   useEffect(() => {
     if (persistReadyProjectId !== projectId) return;
+    const imgs = entries.filter((entry) => entry.kind === "image");
+    const activePath =
+      selectedImageIndex >= 0 && imgs[selectedImageIndex]
+        ? imgs[selectedImageIndex]!.relativePath
+        : loadDatasetEditorFormPersist(projectId)?.lastImageRelativePath ?? "";
     saveDatasetEditorFormPersist(projectId, {
-      llmUserHint,
+      llmDirectTagHint,
+      llmConversationHint,
       llmTagMode,
       triggerWord,
       triggerWordPosition,
@@ -231,11 +246,15 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       taggingMode,
       onlyUntagged,
       previewDockOpen,
+      lastImageRelativePath: activePath,
     });
   }, [
     persistReadyProjectId,
     projectId,
-    llmUserHint,
+    entries,
+    selectedImageIndex,
+    llmDirectTagHint,
+    llmConversationHint,
     llmTagMode,
     triggerWord,
     triggerWordPosition,
@@ -337,17 +356,6 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       return nextIndex >= 0 ? nextIndex : currentIndex;
     });
   }, [imageEntries]);
-
-  const initialImageNavigatedRef = useRef(false);
-  useEffect(() => {
-    if (!initialImagePath || initialImageNavigatedRef.current) return;
-    if (imageEntries.length === 0) return;
-    const found = imageEntries.find((e) => e.relativePath === initialImagePath);
-    if (found) {
-      openImage(initialImagePath);
-      initialImageNavigatedRef.current = true;
-    }
-  }, [imageEntries, initialImagePath, openImage]);
 
   const toggleDirectoryExpansion = useCallback((path: string) => {
     setExpandedDirs((prev) => {
@@ -842,12 +850,29 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     }
 
     setSelectedImageIndex((currentIndex) => {
-      if (currentIndex < 0) {
-        return 0;
+      if (currentIndex >= 0) {
+        return Math.min(currentIndex, imageEntries.length - 1);
       }
-      return Math.min(currentIndex, imageEntries.length - 1);
+
+      if (initialImagePath && !initialImageNavigatedRef.current) {
+        const initialIdx = imageEntries.findIndex((e) => e.relativePath === initialImagePath);
+        initialImageNavigatedRef.current = true;
+        if (initialIdx >= 0) {
+          return initialIdx;
+        }
+      }
+
+      const savedPath = lastRestoredImagePathRef.current;
+      if (savedPath) {
+        const savedIdx = imageEntries.findIndex((e) => e.relativePath === savedPath);
+        if (savedIdx >= 0) {
+          return savedIdx;
+        }
+      }
+
+      return 0;
     });
-  }, [imageEntries]);
+  }, [imageEntries, initialImagePath]);
 
   const currentImage = selectedImageIndex >= 0 ? imageEntries[selectedImageIndex] ?? null : null;
 
@@ -1262,8 +1287,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
   const applyGeneratedCaption = async () => {
     if (!asset) return;
-    const hint = llmUserHint.trim();
     const isConversation = llmTagMode === "conversationModify";
+    const hint = (isConversation ? llmConversationHint : llmDirectTagHint).trim();
     if (isConversation && hint.length === 0) {
       setError(t("dataset.modifyCaptionNeedHint"));
       return;
@@ -1380,7 +1405,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         });
 
         try {
-          const hint = llmUserHint.trim();
+          const hint = llmDirectTagHint.trim();
           const nextCaption = await autoTagImage(
             projectId,
             entry.relativePath,
@@ -1434,7 +1459,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     projectId,
     taggingMode,
     t,
-    llmUserHint,
+    llmDirectTagHint,
   ]);
 
   const applyTriggerWordToAll = useCallback(async () => {
@@ -1614,8 +1639,10 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         onAutoTag={applyGeneratedCaption}
         llmTagMode={llmTagMode}
         setLlmTagMode={setLlmTagMode}
-        llmUserHint={llmUserHint}
-        setLlmUserHint={setLlmUserHint}
+        llmDirectTagHint={llmDirectTagHint}
+        setLlmDirectTagHint={setLlmDirectTagHint}
+        llmConversationHint={llmConversationHint}
+        setLlmConversationHint={setLlmConversationHint}
         triggerWord={triggerWord}
         setTriggerWord={setTriggerWord}
         triggerWordScope={triggerWordScope}

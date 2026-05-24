@@ -5,7 +5,10 @@ export type DatasetEditorTriggerScope = "all" | "group" | "selection";
 import type { CaptionTagMode } from "./types";
 
 export type DatasetEditorFormPersist = {
-  llmUserHint: string;
+  /** Optional notes sent with direct (auto) tagging. */
+  llmDirectTagHint: string;
+  /** Edit instruction for conversation modify mode. */
+  llmConversationHint: string;
   /** Single-image LLM mode: direct tagging vs conversation modify. */
   llmTagMode: CaptionTagMode;
   triggerWord: string;
@@ -37,6 +40,8 @@ export type DatasetEditorFormPersist = {
   onlyUntagged: boolean;
   /** Vertical preview tool dock next to image (legacy key `showBatchPanel`). */
   previewDockOpen: boolean;
+  /** Dataset-relative path of the last previewed image when leaving the editor. */
+  lastImageRelativePath: string;
 };
 
 function key(projectId: string): string {
@@ -49,7 +54,7 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
     const raw = window.localStorage.getItem(key(projectId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<
-      DatasetEditorFormPersist & { showBatchPanel?: boolean }
+      DatasetEditorFormPersist & { showBatchPanel?: boolean; llmUserHint?: string }
     >;
     if (typeof parsed !== "object" || parsed === null) return null;
     const taggingMode = parsed.taggingMode === "range" ? "range" : "all";
@@ -68,8 +73,23 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
     const tagModeRaw = parsed.llmTagMode;
     const llmTagMode =
       tagModeRaw === "conversationModify" ? "conversationModify" : "direct";
+    const legacyHint =
+      typeof parsed.llmUserHint === "string" ? parsed.llmUserHint : "";
+    const llmDirectTagHint =
+      typeof parsed.llmDirectTagHint === "string"
+        ? parsed.llmDirectTagHint
+        : llmTagMode === "direct"
+          ? legacyHint
+          : "";
+    const llmConversationHint =
+      typeof parsed.llmConversationHint === "string"
+        ? parsed.llmConversationHint
+        : llmTagMode === "conversationModify"
+          ? legacyHint
+          : "";
     return {
-      llmUserHint: typeof parsed.llmUserHint === "string" ? parsed.llmUserHint : "",
+      llmDirectTagHint,
+      llmConversationHint,
       llmTagMode,
       triggerWord: typeof parsed.triggerWord === "string" ? parsed.triggerWord : "",
       triggerWordPosition:
@@ -84,6 +104,8 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
       taggingMode,
       onlyUntagged: typeof parsed.onlyUntagged === "boolean" ? parsed.onlyUntagged : false,
       previewDockOpen: dockLegacy,
+      lastImageRelativePath:
+        typeof parsed.lastImageRelativePath === "string" ? parsed.lastImageRelativePath : "",
     };
   } catch {
     return null;

@@ -540,3 +540,54 @@ export function createDpPreset(name: string, config: DiffusionPipeConfig): Diffu
     config,
   };
 }
+
+// ─── per-project preset dropdown selection ────────────────────────────────────
+
+export type TrainingPresetBackend = "sd-scripts" | "diffusion-pipe";
+
+const TRAINING_PRESET_SELECTION_NS = "lora-forge.trainingPresetSelection.v1";
+
+function trainingPresetSelectionKey(projectId: string, backend: TrainingPresetBackend): string {
+  return `${TRAINING_PRESET_SELECTION_NS}:${projectId}:${backend}`;
+}
+
+export function loadTrainingPresetSelection(
+  projectId: string,
+  backend: TrainingPresetBackend,
+): string | null {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(trainingPresetSelectionKey(projectId, backend));
+    return raw && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveTrainingPresetSelection(
+  projectId: string,
+  backend: TrainingPresetBackend,
+  presetId: string,
+): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const key = trainingPresetSelectionKey(projectId, backend);
+    if (!presetId) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, presetId);
+  } catch {
+    // quota / private mode — ignore
+  }
+}
+
+export function resolveTrainingPresetSelection(
+  projectId: string,
+  backend: TrainingPresetBackend,
+  validIds: string[],
+): string {
+  const saved = loadTrainingPresetSelection(projectId, backend);
+  if (!saved) return "";
+  return validIds.includes(saved) ? saved : "";
+}

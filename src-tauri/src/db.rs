@@ -56,6 +56,14 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
             updated_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS llm_providers (
+            id TEXT PRIMARY KEY,
+            config_json TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS baidu_translate_settings (
             id TEXT PRIMARY KEY,
             config_json TEXT NOT NULL,
@@ -453,35 +461,53 @@ pub fn load_training_env(connection: &Connection) -> AppResult<TrainingEnvSettin
 }
 
 pub fn save_llm_settings(connection: &Connection, settings: &LlmSettings) -> AppResult<()> {
-    let config_json = serde_json::to_string(settings)?;
-    connection.execute(
-        "
-        INSERT INTO llm_settings (id, config_json, version, updated_at)
-        VALUES ('global', ?1, 1, ?2)
-        ON CONFLICT(id) DO UPDATE SET
-            config_json = excluded.config_json,
-            version = llm_settings.version + 1,
-            updated_at = excluded.updated_at
-        ",
-        params![config_json, now_ts()],
-    )?;
+    crate::llm_provider_db::migrate_llm_providers_if_needed(connection)?;
+    let mut global = crate::llm_provider_db::load_llm_global_settings(connection)?;
+    global.ingest_behavior_from(settings);
 
-    Ok(())
+    if !settings.active_provider_id.is_empty() {
+        global.active_provider_id = settings.active_provider_id.clone();
+    }
+    if !settings.model_id.trim().is_empty() {
+        global.active_model_id = settings.model_id.clone();
+    }
+
+    if !settings.endpoint_url.trim().is_empty() && !global.active_provider_id.is_empty() {
+        if let Ok(mut provider) =
+            crate::llm_provider_db::get_llm_provider(connection, &global.active_provider_id)
+        {
+            provider.endpoint_url = settings.endpoint_url.clone();
+            if !settings.api_key.trim().is_empty() {
+                provider.api_key = settings.api_key.clone();
+            }
+            provider.endpoint_kind = settings.endpoint_kind;
+            provider.updated_at = crate::utils::now_ts();
+            if !settings.model_id.trim().is_empty()
+                && !provider.models.iter().any(|m| m.model_id == settings.model_id)
+            {
+                provider.models.push(crate::models::LlmProviderModelEntry {
+                    id: crate::utils::new_entity_id("mdl"),
+                    model_id: settings.model_id.clone(),
+                    label: None,
+                    source: crate::models::LlmModelSource::Manual,
+                });
+            }
+            crate::llm_provider_db::save_llm_provider_full(connection, &provider)?;
+        }
+    }
+
+    crate::llm_provider_db::save_llm_global_settings(connection, &global)
 }
 
 pub fn load_llm_settings(connection: &Connection) -> AppResult<LlmSettings> {
-    let maybe_json = connection
-        .query_row(
-            "SELECT config_json FROM llm_settings WHERE id = 'global'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
+    crate::llm_provider_db::resolve_effective_llm_settings_from_db(connection)
+}
 
-    match maybe_json {
-        Some(config_json) => Ok(serde_json::from_str(&config_json)?),
-        None => Ok(LlmSettings::default()),
-    }
+pub fn mark_model_text_only_in_global(
+    connection: &Connection,
+    model_id: &str,
+) -> AppResult<()> {
+    crate::llm_provider_db::mark_model_text_only_in_global(connection, model_id)
 }
 
 pub fn save_baidu_translate_settings(

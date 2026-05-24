@@ -8,6 +8,10 @@ import type {
   DatasetPreviewAsset,
   DatasetEntry,
   DiffusionPipeConfig,
+  LlmGlobalSettings,
+  LlmProvider,
+  LlmProviderModelEntry,
+  LlmProviderSummary,
   LlmSettings,
   ProjectRecord,
   SampleImageEntry,
@@ -75,6 +79,69 @@ export function saveLlmSettings(settings: LlmSettings): Promise<LlmSettings> {
       settings,
     },
   });
+}
+
+export function listLlmProviders(): Promise<LlmProviderSummary[]> {
+  return invoke("list_llm_providers");
+}
+
+export function getLlmProvider(providerId: string): Promise<LlmProvider> {
+  return invoke("get_llm_provider", { providerId });
+}
+
+export function createLlmProvider(input: {
+  name: string;
+  endpointUrl: string;
+  apiKey: string;
+  endpointKind: LlmProvider["endpointKind"];
+  initialModelId?: string;
+}): Promise<LlmProvider> {
+  return invoke("create_llm_provider", { input });
+}
+
+export function updateLlmProvider(input: {
+  providerId: string;
+  name: string;
+  endpointUrl: string;
+  apiKey: string;
+  endpointKind: LlmProvider["endpointKind"];
+}): Promise<LlmProvider> {
+  return invoke("update_llm_provider", { input });
+}
+
+export function deleteLlmProvider(providerId: string): Promise<void> {
+  return invoke("delete_llm_provider", { input: { providerId } });
+}
+
+export function addLlmProviderModel(input: {
+  providerId: string;
+  modelId: string;
+  label?: string;
+  source?: "manual" | "fetched";
+}): Promise<LlmProvider> {
+  return invoke("add_llm_provider_model", { input });
+}
+
+export function deleteLlmProviderModel(input: {
+  providerId: string;
+  entryId: string;
+}): Promise<LlmProvider> {
+  return invoke("delete_llm_provider_model", { input });
+}
+
+export function fetchLlmProviderModels(input: {
+  providerId: string;
+  endpointUrl?: string;
+  apiKey?: string;
+}): Promise<string[]> {
+  return invoke("fetch_llm_provider_models", { input });
+}
+
+export function setActiveLlmSelection(input: {
+  providerId: string;
+  modelId: string;
+}): Promise<LlmGlobalSettings> {
+  return invoke("set_active_llm_selection", { input });
 }
 
 export function loadBaiduTranslateSettings(): Promise<BaiduTranslateSettings> {

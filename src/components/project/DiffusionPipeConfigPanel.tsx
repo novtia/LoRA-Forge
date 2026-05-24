@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Box,
   Cpu,
@@ -21,7 +21,9 @@ import { readTextFile, writeTextFile } from "../../lib/desktopApi";
 import {
   createDpPreset,
   loadDpPresetsFromStorage,
+  resolveTrainingPresetSelection,
   saveDpPresetsToStorage,
+  saveTrainingPresetSelection,
   type DiffusionPipePreset,
 } from "../../lib/presets";
 import { PresetDropdownMenu, type PresetMenuGroup } from "../PresetDropdownMenu";
@@ -313,6 +315,7 @@ function modelComponents(modelType: string): ModelComponents {
 type TabKey = "basic" | "advanced" | "expert";
 
 interface DiffusionPipeConfigPanelProps {
+  projectId: string;
   /** Current config managed by parent (null while loading). */
   config: DiffusionPipeConfig | null;
   /** Called whenever any field changes — parent owns state. */
@@ -320,6 +323,7 @@ interface DiffusionPipeConfigPanelProps {
 }
 
 export default function DiffusionPipeConfigPanel({
+  projectId,
   config,
   onChange,
 }: DiffusionPipeConfigPanelProps) {
@@ -330,6 +334,11 @@ export default function DiffusionPipeConfigPanel({
   const [savePresetName, setSavePresetName] = useState("");
   const [savePresetError, setSavePresetError] = useState<string | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const validIds = presets.map((p) => p.id);
+    setSelectedPresetId(resolveTrainingPresetSelection(projectId, "diffusion-pipe", validIds));
+  }, [projectId, presets]);
 
   const update = <K extends keyof DiffusionPipeConfig>(key: K, value: DiffusionPipeConfig[K]) => {
     if (!config) return;
@@ -366,7 +375,9 @@ export default function DiffusionPipeConfigPanel({
     const next = [...presets, createDpPreset(name, config)];
     setPresets(next);
     saveDpPresetsToStorage(next);
-    setSelectedPresetId(next[next.length - 1].id);
+    const nextId = next[next.length - 1]!.id;
+    setSelectedPresetId(nextId);
+    saveTrainingPresetSelection(projectId, "diffusion-pipe", nextId);
     setSavePresetOpen(false);
     setSavePresetName("");
   };
@@ -377,6 +388,7 @@ export default function DiffusionPipeConfigPanel({
     setPresets(next);
     saveDpPresetsToStorage(next);
     setSelectedPresetId("");
+    saveTrainingPresetSelection(projectId, "diffusion-pipe", "");
   };
 
   const presetMenuGroups = useMemo((): PresetMenuGroup[] => {
@@ -500,7 +512,11 @@ export default function DiffusionPipeConfigPanel({
 
           <PresetDropdownMenu
             value={selectedPresetId}
-            onChange={(v) => { setSelectedPresetId(v); setPresetError(null); }}
+            onChange={(v) => {
+              setSelectedPresetId(v);
+              saveTrainingPresetSelection(projectId, "diffusion-pipe", v);
+              setPresetError(null);
+            }}
             placeholder="— 选择预设 —"
             groups={presetMenuGroups}
             allowEmptyValue

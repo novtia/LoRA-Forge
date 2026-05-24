@@ -27,6 +27,15 @@ pub fn now_ts() -> i64 {
         .unwrap_or_default()
 }
 
+/// Short unique id for DB rows (provider / model entry).
+pub fn new_entity_id(prefix: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    format!("{prefix}-{}-{nanos:x}", now_ts())
+}
+
 pub fn slugify(input: &str) -> String {
     let slug = input
         .chars()

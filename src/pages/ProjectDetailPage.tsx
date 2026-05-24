@@ -1201,11 +1201,12 @@ export default function ProjectDetailPage() {
           </div>
 
           {configTab === "sd-scripts" && draftConfig ? (
-            <ConfigEditor config={draftConfig} onChange={setDraftConfig} />
+            <ConfigEditor projectId={projectId} config={draftConfig} onChange={setDraftConfig} />
           ) : null}
 
           {configTab === "diffusion-pipe" ? (
             <DiffusionPipeConfigPanel
+              projectId={projectId}
               config={draftDpConfig}
               onChange={setDraftDpConfig}
             />

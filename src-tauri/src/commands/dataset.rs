@@ -246,6 +246,8 @@ pub async fn auto_tag_image(
     user_message: Option<String>,
     previous_assistant_caption: Option<String>,
     previous_image_relative_path: Option<String>,
+    tag_mode: Option<String>,
+    current_caption: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     state.reset_llm_caption_cancel();
@@ -262,12 +264,16 @@ pub async fn auto_tag_image(
     let user_message = trim_opt(user_message);
     let previous_assistant_caption = trim_opt(previous_assistant_caption);
     let previous_image_relative_path = trim_opt(previous_image_relative_path);
+    let current_caption = trim_opt(current_caption);
+    let tag_mode = crate::models::CaptionTagMode::parse(tag_mode.as_deref());
     respond(
         generate_caption_inner(
             state.inner().clone(),
             &project_id,
             &relative_path,
+            tag_mode,
             user_message.as_deref(),
+            current_caption.as_deref(),
             previous_assistant_caption.as_deref(),
             previous_image_relative_path.as_deref(),
         )
@@ -833,7 +839,9 @@ async fn generate_caption_inner(
     state: AppState,
     project_id: &str,
     relative_path: &str,
+    tag_mode: crate::models::CaptionTagMode,
     user_message: Option<&str>,
+    current_caption: Option<&str>,
     previous_assistant_caption: Option<&str>,
     previous_image_relative_path: Option<&str>,
 ) -> AppResult<String> {
@@ -857,10 +865,12 @@ async fn generate_caption_inner(
         }
     });
 
-    llm::generate_dataset_caption(
+    llm::caption_for_dataset_image(
         &settings,
         &image_path,
+        tag_mode,
         user_message,
+        current_caption,
         previous_assistant_caption,
         previous_image_path.as_deref(),
         &cancel,

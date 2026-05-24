@@ -2,8 +2,12 @@ const STORAGE_NS = "loraForge.datasetEditorForm.v1";
 
 export type DatasetEditorTriggerScope = "all" | "group" | "selection";
 
+import type { CaptionTagMode } from "./types";
+
 export type DatasetEditorFormPersist = {
   llmUserHint: string;
+  /** Single-image LLM mode: direct tagging vs conversation modify. */
+  llmTagMode: CaptionTagMode;
   triggerWord: string;
   /**
    * Insertion position for the trigger word, as a raw string captured from the UI input.
@@ -61,8 +65,12 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
     const batchScopeRaw = parsed.batchTaggingScope;
     const batchTaggingScope: DatasetEditorTriggerScope =
       batchScopeRaw === "group" || batchScopeRaw === "selection" ? batchScopeRaw : "all";
+    const tagModeRaw = parsed.llmTagMode;
+    const llmTagMode =
+      tagModeRaw === "conversationModify" ? "conversationModify" : "direct";
     return {
       llmUserHint: typeof parsed.llmUserHint === "string" ? parsed.llmUserHint : "",
+      llmTagMode,
       triggerWord: typeof parsed.triggerWord === "string" ? parsed.triggerWord : "",
       triggerWordPosition:
         typeof parsed.triggerWordPosition === "string" ? parsed.triggerWordPosition : "",

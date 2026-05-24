@@ -187,6 +187,9 @@ export type LlmPriorCaptionMode =
   | "injectAsAssistant"
   | "injectAsUserExample";
 
+/** Single-image LLM tagging interaction mode. */
+export type CaptionTagMode = "direct" | "conversationModify";
+
 export interface LlmSettings {
   endpointUrl: string;
   apiKey: string;

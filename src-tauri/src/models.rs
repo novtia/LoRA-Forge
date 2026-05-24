@@ -447,6 +447,31 @@ impl Default for PriorCaptionMode {
     }
 }
 
+/// 单张打标时的交互模式。
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CaptionTagMode {
+    /// 从图片（+ 可选备注）直接生成 caption。
+    Direct,
+    /// 基于现有 caption + 用户指令，通过内部工具修改。
+    ConversationModify,
+}
+
+impl Default for CaptionTagMode {
+    fn default() -> Self {
+        Self::Direct
+    }
+}
+
+impl CaptionTagMode {
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(str::trim).filter(|s| !s.is_empty()) {
+            Some("conversationModify") => Self::ConversationModify,
+            _ => Self::Direct,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct LlmSettings {
@@ -477,6 +502,19 @@ pub struct LlmSettings {
     /// 上一张图 caption 的注入策略，默认 Off（避免上一图 caption 泄漏到当前图）。
     #[serde(default = "default_prior_caption_mode")]
     pub prior_caption_mode: PriorCaptionMode,
+    /// 曾拒绝 image_url 输入的 model_id 列表；这些模型后续请求不再附带图片。
+    #[serde(default)]
+    pub text_only_model_ids: Vec<String>,
+}
+
+impl LlmSettings {
+    /// 是否应在请求中附带图片（未被记录为纯文本模型时为 true）。
+    pub fn should_include_image(&self) -> bool {
+        !self
+            .text_only_model_ids
+            .iter()
+            .any(|id| id == &self.model_id)
+    }
 }
 
 fn default_sd_scripts_path() -> String {
@@ -591,6 +629,7 @@ impl Default for LlmSettings {
             reasoning_budget: default_u32_zero(),
             reasoning_effort: default_reasoning_effort(),
             prior_caption_mode: default_prior_caption_mode(),
+            text_only_model_ids: Vec::new(),
         }
     }
 }

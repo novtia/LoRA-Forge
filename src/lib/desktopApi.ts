@@ -18,6 +18,7 @@ import type {
   TrainingProgressEvent,
   TrainingStateChangedEvent,
 } from "./types";
+import type { CaptionTagMode } from "./types";
 
 export function listProjects(): Promise<ProjectRecord[]> {
   return invoke("list_projects");
@@ -224,10 +225,13 @@ export function autoTagImage(
   userMessage?: string | null,
   previousAssistantCaption?: string | null,
   previousImageRelativePath?: string | null,
+  tagMode?: CaptionTagMode | null,
+  currentCaption?: string | null,
 ): Promise<string> {
   const trimmed = userMessage?.trim();
   const prev = previousAssistantCaption?.trim();
   const prevImg = previousImageRelativePath?.trim();
+  const caption = currentCaption?.trim();
   return invoke("auto_tag_image", {
     projectId,
     relativePath,
@@ -236,6 +240,8 @@ export function autoTagImage(
       prev && prev.length > 0 ? prev : null,
     previousImageRelativePath:
       prevImg && prevImg.length > 0 ? prevImg : null,
+    tagMode: tagMode ?? "direct",
+    currentCaption: caption && caption.length > 0 ? caption : null,
   });
 }
 

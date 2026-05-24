@@ -14,6 +14,7 @@
 //! * `HttpServer` / `Network` / `Parse` → 指数回退后重试 `caption_retry_max` 次。
 
 mod profile;
+mod caption_tools;
 
 use std::{
     fs,
@@ -32,13 +33,20 @@ use serde_json::{json, Map, Value};
 use tokio::time::sleep;
 
 use crate::{
+    db,
     error::{AppError, AppResult},
-    models::{EndpointKind, LlmSettings, PriorCaptionMode},
+    models::{CaptionTagMode, EndpointKind, LlmSettings, PriorCaptionMode},
     state::AppState,
 };
 
 const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system-prompt.en.md");
 const AUTO_TAG_PROMPT: &str = "Generate a concise, training-ready caption for this image for a Stable Diffusion or LoRA dataset. Return only a comma-separated Danbooru-style tag list with no preamble and no full sentences. Include subject, appearance, clothing, pose, framing, environment, and scene lighting when visible. Do NOT include art-style or medium tags (anime, realistic, sketch, cel_shading, monochrome, illustration, etc.), quality tags (masterpiece, best_quality, score_*), or artist names — the LoRA learns rendering from pixels. Keep it factual.";
+const MODIFY_CAPTION_SYSTEM_PROMPT: &str = "You edit Danbooru-style comma-separated training captions for Stable Diffusion / LoRA datasets. \
+The user provides the current caption and natural-language edit instructions. \
+You MUST apply changes ONLY by calling the provided tools (add_tags, remove_tags, replace_tag, set_caption). \
+Do not output markdown or explanations. After tool calls the system returns the updated caption. \
+When the caption matches the user's intent, stop calling tools.";
+const MAX_CAPTION_TOOL_ROUNDS: usize = 8;
 /// Keeps multimodal payloads small; omit prior turn if exceeding this character count after trim.
 const MAX_PREVIOUS_ASSISTANT_CHARS: usize = 12_000;
 /// 用于日志截断（避免在 stderr / api log 里写出整张图的 base64）。
@@ -105,6 +113,142 @@ fn compose_auto_tag_user_prompt(
     body
 }
 
+fn build_user_message_content(text: &str, image_data_url: Option<&str>, supports_vision: bool) -> Value {
+    if supports_vision {
+        if let Some(url) = image_data_url.filter(|u| !u.is_empty()) {
+            return json!([
+                {"type": "text", "text": text},
+                {"type": "image_url", "image_url": {"url": url}},
+            ]);
+        }
+    }
+    json!(text)
+}
+
+fn compose_modify_user_prompt(
+    user_instruction: &str,
+    current_caption: &str,
+    include_image_note: bool,
+) -> String {
+    let mut body = format!(
+        "Current caption (comma-separated Danbooru tags):\n{}\n\nUser edit request:\n{}",
+        current_caption.trim(),
+        user_instruction.trim()
+    );
+    if include_image_note {
+        body.push_str(
+            "\n\nAn image of the subject is attached for reference when deciding tag changes.",
+        );
+    } else {
+        body.push_str(
+            "\n\n(No image is available — edit the caption text only based on the user's request.)",
+        );
+    }
+    body.push_str("\n\nUse the provided tools to apply the requested changes.");
+    body
+}
+
+fn persist_model_as_text_only(log_sink: &AppState, model_id: &str) -> AppResult<()> {
+    log_sink.with_db(|connection| {
+        let mut settings = db::load_llm_settings(connection)?;
+        if settings.text_only_model_ids.iter().any(|id| id == model_id) {
+            return Ok(());
+        }
+        settings.text_only_model_ids.push(model_id.to_string());
+        db::save_llm_settings(connection, &settings)
+    })
+}
+
+/// 若上游拒绝图片输入：记录 model_id 为纯文本，并立即无图重试一次。
+async fn run_with_image_fallback<F, Fut>(
+    include_image: &mut bool,
+    model_id: &str,
+    log_sink: &Option<AppState>,
+    operation: F,
+) -> AppResult<String>
+where
+    F: Fn(bool) -> Fut,
+    Fut: Future<Output = AppResult<String>>,
+{
+    if !*include_image {
+        return operation(false).await;
+    }
+    match operation(true).await {
+        Ok(value) => Ok(value),
+        Err(err) if err.is_image_content_rejection() => {
+            if let Some(st) = log_sink {
+                let _ = persist_model_as_text_only(st, model_id);
+                st.push_api_log(
+                    "llm",
+                    "info",
+                    format!(
+                        "模型 {} 不支持图片输入，已记录为纯文本模型并无感重试",
+                        model_id
+                    ),
+                );
+            }
+            *include_image = false;
+            operation(false).await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// 统一入口：按 `tag_mode` 分发直接打标或对话修改。
+pub async fn caption_for_dataset_image(
+    settings: &LlmSettings,
+    image_path: &Path,
+    tag_mode: CaptionTagMode,
+    user_message: Option<&str>,
+    current_caption: Option<&str>,
+    previous_assistant_caption: Option<&str>,
+    previous_image_path: Option<&Path>,
+    cancel: &Arc<AtomicBool>,
+    log_sink: Option<AppState>,
+) -> AppResult<String> {
+    match tag_mode {
+        CaptionTagMode::Direct => {
+            generate_dataset_caption(
+                settings,
+                image_path,
+                user_message,
+                previous_assistant_caption,
+                previous_image_path,
+                cancel,
+                log_sink,
+            )
+            .await
+        }
+        CaptionTagMode::ConversationModify => {
+            let instruction = user_message
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AppError::Validation(
+                        "Conversation modify mode requires a user instruction".to_string(),
+                    )
+                })?;
+            let caption = current_caption
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| {
+                    AppError::Validation(
+                        "Conversation modify mode requires an existing caption to edit".to_string(),
+                    )
+                })?;
+            modify_dataset_caption(
+                settings,
+                image_path,
+                caption,
+                instruction,
+                cancel,
+                log_sink,
+            )
+            .await
+        }
+    }
+}
+
 pub async fn generate_dataset_caption(
     settings: &LlmSettings,
     image_path: &Path,
@@ -161,6 +305,8 @@ pub async fn generate_dataset_caption(
     let max_extra_attempts = settings.caption_retry_max;
     let total_attempts = max_extra_attempts.saturating_add(1);
     let mut last_err: Option<AppError> = None;
+    let mut include_image = settings.should_include_image();
+    let model_id = settings.model_id.clone();
 
     for attempt in 0..=max_extra_attempts {
         if cancel.load(Ordering::SeqCst) {
@@ -189,18 +335,21 @@ pub async fn generate_dataset_caption(
         if cancel.load(Ordering::SeqCst) {
             return Err(AppError::Cancelled);
         }
-        match generate_dataset_caption_once(
-            settings,
-            &image_data_url,
-            image_byte_count,
-            mime,
-            user_message,
-            previous_assistant_caption,
-            previous_image_data_url.as_deref(),
-            cancel,
-            display_image.clone(),
-            log_sink.clone(),
-        )
+        match run_with_image_fallback(&mut include_image, &model_id, &log_sink, |with_image| {
+            generate_dataset_caption_once(
+                settings,
+                &image_data_url,
+                image_byte_count,
+                mime,
+                user_message,
+                previous_assistant_caption,
+                previous_image_data_url.as_deref(),
+                with_image,
+                cancel,
+                display_image.clone(),
+                log_sink.clone(),
+            )
+        })
         .await
         {
             Ok(caption) => return Ok(caption),
@@ -219,6 +368,305 @@ pub async fn generate_dataset_caption(
             total_attempts
         ))
     }))
+}
+
+/// 对话修改模式：用户指令 + 现有 caption，LLM 通过内部工具修改。
+pub async fn modify_dataset_caption(
+    settings: &LlmSettings,
+    image_path: &Path,
+    current_caption: &str,
+    user_instruction: &str,
+    cancel: &Arc<AtomicBool>,
+    log_sink: Option<AppState>,
+) -> AppResult<String> {
+    settings.validate().map_err(AppError::Validation)?;
+
+    let display_image = image_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image")
+        .to_string();
+    let mime = mime_type_for_image(image_path);
+    let image_bytes = fs::read(image_path)?;
+    let image_data_url = format!(
+        "data:{};base64,{}",
+        mime,
+        STANDARD.encode(&image_bytes)
+    );
+    drop(image_bytes);
+
+    let max_extra_attempts = settings.caption_retry_max;
+    let mut last_err: Option<AppError> = None;
+    let mut include_image = settings.should_include_image();
+    let model_id = settings.model_id.clone();
+
+    for attempt in 0..=max_extra_attempts {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(AppError::Cancelled);
+        }
+        if attempt > 0 {
+            let base: u64 = 600u64.saturating_mul(1u64 << (attempt - 1).min(6));
+            let sleep_ms = base.saturating_add(pseudo_jitter_ms()).min(8000);
+            if let (Some(ref st), Some(prev)) = (log_sink.as_ref(), last_err.as_ref()) {
+                st.push_api_log(
+                    "llm",
+                    "warn",
+                    format!(
+                        "重试 caption modify {}/{} · {} · 等待 {}ms",
+                        attempt, max_extra_attempts, prev, sleep_ms
+                    ),
+                );
+            }
+            sleep(Duration::from_millis(sleep_ms)).await;
+        }
+        if cancel.load(Ordering::SeqCst) {
+            return Err(AppError::Cancelled);
+        }
+        match run_with_image_fallback(&mut include_image, &model_id, &log_sink, |with_image| {
+            modify_dataset_caption_once(
+                settings,
+                Some(image_data_url.as_str()),
+                current_caption,
+                user_instruction,
+                with_image,
+                cancel,
+                display_image.clone(),
+                log_sink.clone(),
+            )
+        })
+        .await
+        {
+            Ok(caption) => return Ok(caption),
+            Err(err) => {
+                if !err.is_retryable() {
+                    return Err(err);
+                }
+                last_err = Some(err);
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| {
+        AppError::Process("LLM caption modify failed after retries".to_string())
+    }))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn modify_dataset_caption_once(
+    settings: &LlmSettings,
+    image_data_url: Option<&str>,
+    initial_caption: &str,
+    user_instruction: &str,
+    include_image: bool,
+    cancel: &Arc<AtomicBool>,
+    display_image: String,
+    log_sink: Option<AppState>,
+) -> AppResult<String> {
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::Cancelled);
+    }
+
+    let endpoint = normalize_chat_completions_url(&settings.endpoint_url)?;
+    let kind = profile::classify_endpoint(settings);
+    let is_thinking = profile::is_thinking_model(&settings.model_id);
+    let model_id = settings.model_id.clone();
+    let api_key = settings.api_key.trim().to_string();
+
+    let user_prompt = compose_modify_user_prompt(
+        user_instruction,
+        initial_caption,
+        include_image && image_data_url.is_some(),
+    );
+
+    let mut messages: Vec<Value> = vec![
+        json!({
+            "role": "system",
+            "content": MODIFY_CAPTION_SYSTEM_PROMPT,
+        }),
+        json!({
+            "role": "user",
+            "content": build_user_message_content(
+                &user_prompt,
+                image_data_url,
+                include_image,
+            ),
+        }),
+    ];
+
+    let mut working_caption = initial_caption.trim().to_string();
+    let tools = caption_tools::caption_edit_tool_definitions();
+
+    for round in 0..MAX_CAPTION_TOOL_ROUNDS {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(AppError::Cancelled);
+        }
+
+        let request_body =
+            build_request_body_with_tools(&model_id, &messages, settings, kind, is_thinking, &tools);
+
+        if let Some(ref st) = log_sink {
+            if round == 0 {
+                st.push_api_log(
+                    "llm",
+                    "info",
+                    format!(
+                        "请求 caption modify · {} · model={} · with_image={} · {}",
+                        display_image,
+                        model_id,
+                        include_image,
+                        endpoint.trim()
+                    ),
+                );
+            }
+            st.push_api_log(
+                "llm",
+                "info",
+                format!(
+                    "caption modify round {} · caption_len={}",
+                    round + 1,
+                    working_caption.len()
+                ),
+            );
+        }
+
+        let payload = post_chat_completions(
+            &endpoint,
+            &request_body,
+            &api_key,
+            kind,
+            cancel,
+            log_sink.as_ref(),
+        )
+        .await?;
+
+        let tool_calls = caption_tools::extract_tool_calls(&payload);
+        if tool_calls.is_empty() {
+            if let Some(text) = extract_user_visible_caption(&payload)
+                .as_deref()
+                .map(sanitize_caption)
+                .filter(|s| !s.is_empty())
+            {
+                return Ok(text);
+            }
+            if working_caption.trim().is_empty() {
+                return Err(AppError::ContentFiltered(
+                    "LLM did not apply caption edits via tools".to_string(),
+                ));
+            }
+            return Ok(sanitize_caption(&working_caption));
+        }
+
+        let assistant_message = payload
+            .pointer("/choices/0/message")
+            .cloned()
+            .unwrap_or(Value::Null);
+        messages.push(assistant_message);
+
+        for (tool_id, tool_name, tool_args) in tool_calls {
+            let (new_caption, tool_err) =
+                caption_tools::apply_caption_tool_call(&working_caption, &tool_name, &tool_args);
+            working_caption = new_caption;
+            let tool_content = if let Some(err) = tool_err {
+                json!({ "success": false, "error": err, "caption": working_caption })
+            } else {
+                json!({ "success": true, "caption": working_caption })
+            };
+            messages.push(json!({
+                "role": "tool",
+                "tool_call_id": tool_id,
+                "content": tool_content.to_string(),
+            }));
+        }
+    }
+
+    Ok(sanitize_caption(&working_caption))
+}
+
+fn build_request_body_with_tools(
+    model_id: &str,
+    messages: &[Value],
+    settings: &LlmSettings,
+    kind: EndpointKind,
+    is_thinking: bool,
+    tools: &Value,
+) -> Value {
+    let mut body = build_request_body(model_id, messages, settings, kind, is_thinking);
+    if let Value::Object(ref mut map) = body {
+        map.insert("tools".to_string(), tools.clone());
+        map.insert("tool_choice".to_string(), json!("auto"));
+    }
+    body
+}
+
+async fn post_chat_completions(
+    endpoint: &str,
+    request_body: &Value,
+    api_key: &str,
+    kind: EndpointKind,
+    cancel: &Arc<AtomicBool>,
+    log_sink: Option<&AppState>,
+) -> AppResult<Value> {
+    let extra_headers = openrouter_extra_headers(kind);
+    let work = async move {
+        let client = shared_http_client();
+        let mut request = client.post(endpoint).json(request_body);
+        if !api_key.is_empty() {
+            request = request.bearer_auth(api_key);
+        }
+        for (name, value) in extra_headers.iter() {
+            request = request.header(*name, *value);
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|err| AppError::Network(err.to_string()))?;
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|err| AppError::Network(err.to_string()))?;
+
+        print_llm_http_response_body_to_stderr(status.as_u16(), &body);
+
+        if !status.is_success() {
+            let detail = extract_error_message(&body);
+            let code = status.as_u16();
+            if let Some(st) = log_sink {
+                st.push_api_log("llm", "error", format!("HTTP {} · {}", code, detail));
+            }
+            if code == 429 || (500..600).contains(&code) {
+                return Err(AppError::HttpServer { status: code, detail });
+            }
+            return Err(AppError::HttpClient { status: code, detail });
+        }
+
+        let payload: Value = serde_json::from_str(&body).map_err(|err| {
+            AppError::Parse(format!(
+                "Failed to parse LLM response as JSON: {err}. Response excerpt: {}",
+                response_excerpt(&body)
+            ))
+        })?;
+
+        if let Some(err_obj) = payload.get("error") {
+            if !matches!(err_obj, Value::Null) {
+                if let Some(detail) = err_obj
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                {
+                    return Err(AppError::HttpClient {
+                        status: 200,
+                        detail,
+                    });
+                }
+            }
+        }
+
+        Ok(payload)
+    };
+
+    run_with_cancel(work, cancel).await
 }
 
 /// 用 `now_ns` 低位做一个非加密强度的伪随机抖动，避免拉入 `rand` 依赖。
@@ -257,6 +705,7 @@ async fn generate_dataset_caption_once(
     user_message: Option<&str>,
     previous_assistant_caption: Option<&str>,
     previous_image_data_url: Option<&str>,
+    include_image: bool,
     cancel: &Arc<AtomicBool>,
     display_image: String,
     log_sink: Option<AppState>,
@@ -349,10 +798,11 @@ async fn generate_dataset_caption_once(
             let prior_user_prompt = compose_auto_tag_user_prompt(user_message, None, false);
             messages.push(json!({
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": prior_user_prompt},
-                    {"type": "image_url", "image_url": {"url": prev_image}},
-                ],
+                "content": build_user_message_content(
+                    &prior_user_prompt,
+                    Some(&prev_image),
+                    include_image,
+                ),
             }));
             messages.push(json!({
                 "role": "assistant",
@@ -370,10 +820,11 @@ async fn generate_dataset_caption_once(
 
     messages.push(json!({
         "role": "user",
-        "content": [
-            {"type": "text", "text": user_prompt},
-            {"type": "image_url", "image_url": {"url": image_data_url.to_string()}},
-        ],
+        "content": build_user_message_content(
+            &user_prompt,
+            Some(image_data_url),
+            include_image,
+        ),
     }));
 
     let request_body = build_request_body(&model_id, &messages, settings, kind, is_thinking);

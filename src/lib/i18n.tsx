@@ -236,6 +236,21 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
       "e.g. Character is X not Y; include the prosthetic arm; background is a school rooftop at sunset.",
     "dataset.llmUserHintDesc":
       "Sent to the LLM together with the image. Use this when auto-tag misidentifies content—the same text is applied to batch tagging until you change or clear it.",
+    "dataset.llmTagMode": "Tagging mode",
+    "dataset.llmTagModeDirect": "Direct tagging",
+    "dataset.llmTagModeConversation": "Conversation edit",
+    "dataset.llmTagModeHintDirect":
+      "Generate a new caption from the image (optional notes above). If the API rejects images, the model is remembered and future requests use text only.",
+    "dataset.llmTagModeHintConversation":
+      "Edit the current caption with natural-language instructions via internal tools. If the API rejects images, the model is remembered and future requests use text only.",
+    "dataset.llmUserHintLabelConversation": "Edit instruction (required)",
+    "dataset.llmUserHintPlaceholderConversation":
+      "e.g. Change background to forest; remove quality tags; add long_hair and red_dress.",
+    "dataset.llmUserHintDescConversation":
+      "Describe how to change the current caption. Requires existing tags in the caption box below.",
+    "dataset.modifyCaption": "Modify Caption (LLM)",
+    "dataset.modifyCaptionNeedHint": "Enter an edit instruction first.",
+    "dataset.modifyCaptionNeedCaption": "Conversation edit requires an existing caption.",
     "dataset.save": "Save",
     "dataset.saving": "Saving...",
     "design.cardPadding": "Card padding",
@@ -767,6 +782,21 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
       "例如：角色是 A 不是 B；必须画上机械臂；背景是学校天台黄昏。",
     "dataset.llmUserHintDesc":
       "会与当前图片一并发给 LLM，用于纠正误解。批量打标时也会带上这段文字，直到你清空或修改。",
+    "dataset.llmTagMode": "打标模式",
+    "dataset.llmTagModeDirect": "直接打标",
+    "dataset.llmTagModeConversation": "对话修改",
+    "dataset.llmTagModeHintDirect":
+      "根据图片生成 caption（上方备注可选）。若 API 拒绝图片，会自动记录该模型并改用纯文本。",
+    "dataset.llmTagModeHintConversation":
+      "用自然语言修改当前 caption，模型通过内部工具增删改标签。若 API 拒绝图片，会自动记录该模型并改用纯文本。",
+    "dataset.llmUserHintLabelConversation": "修改指令（必填）",
+    "dataset.llmUserHintPlaceholderConversation":
+      "例如：背景改成森林；去掉质量词；加上 long_hair 和 red_dress。",
+    "dataset.llmUserHintDescConversation":
+      "描述要如何修改下方 caption 区的现有标签。需要已有 caption 内容。",
+    "dataset.modifyCaption": "对话修改（LLM）",
+    "dataset.modifyCaptionNeedHint": "请先输入修改指令。",
+    "dataset.modifyCaptionNeedCaption": "对话修改模式需要已有 caption 内容。",
     "dataset.nextImage": "下一张图片",
     "dataset.prevImage": "上一张图片",
     "dataset.imageKeyboardNavHint":

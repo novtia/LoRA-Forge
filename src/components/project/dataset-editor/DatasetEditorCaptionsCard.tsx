@@ -16,7 +16,7 @@ import {
 import { cancelLlmCaption } from "../../../lib/desktopApi";
 import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
 import { useI18n } from "../../../lib/i18n";
-import type { DatasetAsset } from "../../../lib/types";
+import type { DatasetAsset, CaptionTagMode } from "../../../lib/types";
 import TranslatedCaptionEditor, {
   type TranslatedCaptionEditorHandle,
   type TranslatedCaptionEditorHighlight,
@@ -28,6 +28,8 @@ type Props = {
   busy: string | null;
   imageEntriesLength: number;
   onAutoTag: () => Promise<void>;
+  llmTagMode: CaptionTagMode;
+  setLlmTagMode: (v: CaptionTagMode) => void;
   llmUserHint: string;
   setLlmUserHint: (v: string) => void;
   triggerWord: string;
@@ -66,6 +68,8 @@ export function DatasetEditorCaptionsCard({
   busy,
   imageEntriesLength,
   onAutoTag,
+  llmTagMode,
+  setLlmTagMode,
   llmUserHint,
   setLlmUserHint,
   triggerWord,
@@ -99,6 +103,7 @@ export function DatasetEditorCaptionsCard({
   error,
 }: Props) {
   const { t } = useI18n();
+  const isConversation = llmTagMode === "conversationModify";
 
   const applyTriggerTitle = useMemo(() => {
     const n = triggerTargetCount;
@@ -144,7 +149,12 @@ export function DatasetEditorCaptionsCard({
             disabled={!asset || (busy !== null && busy !== "llm")}
             onClick={() => void onAutoTag()}
           >
-            <Bot size={18} /> {busy === "llm" ? t("dataset.running") : t("dataset.autoTag")}
+            <Bot size={18} />{" "}
+            {busy === "llm"
+              ? t("dataset.running")
+              : isConversation
+                ? t("dataset.modifyCaption")
+                : t("dataset.autoTag")}
           </button>
           <button
             type="button"
@@ -160,19 +170,90 @@ export function DatasetEditorCaptionsCard({
             <StopCircle size={20} aria-hidden />
           </button>
         </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem" }}>
+          <label className="form-label">{t("dataset.llmTagMode")}</label>
+          <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="btn"
+              style={{
+                flex: 1,
+                minWidth: "7rem",
+                justifyContent: "center",
+                padding: "0.45rem 0.65rem",
+                fontSize: "0.78rem",
+                borderColor:
+                  llmTagMode === "direct" ? "var(--accent-acid)" : "var(--border-dim)",
+                background:
+                  llmTagMode === "direct"
+                    ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
+                    : undefined,
+                color: llmTagMode === "direct" ? "var(--text-main)" : "var(--text-muted)",
+              }}
+              aria-pressed={llmTagMode === "direct"}
+              disabled={busy !== null}
+              onClick={() => setLlmTagMode("direct")}
+            >
+              {t("dataset.llmTagModeDirect")}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              style={{
+                flex: 1,
+                minWidth: "7rem",
+                justifyContent: "center",
+                padding: "0.45rem 0.65rem",
+                fontSize: "0.78rem",
+                borderColor:
+                  llmTagMode === "conversationModify"
+                    ? "var(--accent-acid)"
+                    : "var(--border-dim)",
+                background:
+                  llmTagMode === "conversationModify"
+                    ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
+                    : undefined,
+                color:
+                  llmTagMode === "conversationModify"
+                    ? "var(--text-main)"
+                    : "var(--text-muted)",
+              }}
+              aria-pressed={llmTagMode === "conversationModify"}
+              disabled={busy !== null}
+              onClick={() => setLlmTagMode("conversationModify")}
+            >
+              {t("dataset.llmTagModeConversation")}
+            </button>
+          </div>
+          <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+            {isConversation
+              ? t("dataset.llmTagModeHintConversation")
+              : t("dataset.llmTagModeHintDirect")}
+          </div>
+        </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-          <label className="form-label">{t("dataset.llmUserHintLabel")}</label>
+          <label className="form-label">
+            {isConversation
+              ? t("dataset.llmUserHintLabelConversation")
+              : t("dataset.llmUserHintLabel")}
+          </label>
           <textarea
             className="form-input"
             style={{ minHeight: "4.5rem", resize: "vertical" }}
-            placeholder={t("dataset.llmUserHintPlaceholder")}
+            placeholder={
+              isConversation
+                ? t("dataset.llmUserHintPlaceholderConversation")
+                : t("dataset.llmUserHintPlaceholder")
+            }
             value={llmUserHint}
             disabled={busy !== null}
             onChange={(e) => setLlmUserHint(e.target.value)}
             spellCheck
           />
           <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
-            {t("dataset.llmUserHintDesc")}
+            {isConversation
+              ? t("dataset.llmUserHintDescConversation")
+              : t("dataset.llmUserHintDesc")}
           </div>
           {showStyleCaptionHint ? (
             <div style={{ fontSize: "0.72rem", color: "var(--accent-orange)", lineHeight: 1.35 }}>

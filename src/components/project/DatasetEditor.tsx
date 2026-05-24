@@ -32,7 +32,7 @@ import {
   type DatasetEditorTriggerScope,
 } from "../../lib/datasetEditorPersistence";
 import { contiguousTagRangeForSelection, splitCaptionTags, charRangeForContiguousTagIndices } from "../../lib/captionSegments";
-import type { ApiLogEntry, DatasetAsset, DatasetEntry } from "../../lib/types";
+import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry } from "../../lib/types";
 import type { TranslatedCaptionEditorHandle } from "./TranslatedCaptionEditor";
 import { buildDatasetContextMenuItems } from "./dataset-editor/buildDatasetContextMenuItems";
 import { DatasetContextMenu } from "./dataset-editor/DatasetContextMenu";
@@ -96,6 +96,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const [triggerWordGroupPath, setTriggerWordGroupPath] = useState("");
   /** Optional text sent to the LLM with the image to reduce mis-tags. */
   const [llmUserHint, setLlmUserHint] = useState("");
+  /** Single-image LLM mode: direct tagging vs conversation modify. */
+  const [llmTagMode, setLlmTagMode] = useState<CaptionTagMode>("direct");
   const [styleTrainingCaptions, setStyleTrainingCaptions] = useState(false);
   /** Avoid writing another project's form snapshot before hydrate completes (projectId switch). */
   const [persistReadyProjectId, setPersistReadyProjectId] = useState<string | null>(null);
@@ -182,6 +184,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   useEffect(() => {
     const saved = loadDatasetEditorFormPersist(projectId);
     setLlmUserHint(saved?.llmUserHint ?? "");
+    setLlmTagMode(saved?.llmTagMode === "conversationModify" ? "conversationModify" : "direct");
     setTriggerWord(saved?.triggerWord ?? "");
     setTriggerWordPosition(saved?.triggerWordPosition ?? "");
     setTriggerWordScope(saved?.triggerWordScope ?? "all");
@@ -217,6 +220,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     if (persistReadyProjectId !== projectId) return;
     saveDatasetEditorFormPersist(projectId, {
       llmUserHint,
+      llmTagMode,
       triggerWord,
       triggerWordPosition,
       triggerWordScope,
@@ -232,6 +236,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     persistReadyProjectId,
     projectId,
     llmUserHint,
+    llmTagMode,
     triggerWord,
     triggerWordPosition,
     triggerWordScope,
@@ -1257,13 +1262,22 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
   const applyGeneratedCaption = async () => {
     if (!asset) return;
+    const hint = llmUserHint.trim();
+    const isConversation = llmTagMode === "conversationModify";
+    if (isConversation && hint.length === 0) {
+      setError(t("dataset.modifyCaptionNeedHint"));
+      return;
+    }
+    if (isConversation && caption.trim().length === 0) {
+      setError(t("dataset.modifyCaptionNeedCaption"));
+      return;
+    }
     setBusy("llm");
     setError(null);
-    const hint = llmUserHint.trim();
 
     let previousAssistantCaption: string | undefined;
     let previousImageRelativePath: string | undefined;
-    if (previousImage) {
+    if (!isConversation && previousImage) {
       try {
         const prior = await readCaption(projectId, previousImage.relativePath);
         const t = prior.trim();
@@ -1284,6 +1298,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         hint.length > 0 ? hint : undefined,
         previousAssistantCaption,
         previousImageRelativePath,
+        llmTagMode,
+        isConversation ? caption : undefined,
       );
       setCaption(nextCaption);
       try {
@@ -1596,6 +1612,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         busy={busy}
         imageEntriesLength={imageEntries.length}
         onAutoTag={applyGeneratedCaption}
+        llmTagMode={llmTagMode}
+        setLlmTagMode={setLlmTagMode}
         llmUserHint={llmUserHint}
         setLlmUserHint={setLlmUserHint}
         triggerWord={triggerWord}

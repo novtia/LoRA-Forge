@@ -61,6 +61,36 @@ impl AppError {
                 | AppError::ContentFiltered(_)
         )
     }
+
+    /// 上游拒绝 multimodal / image_url 内容块（应改用纯文本并重试）。
+    pub fn is_image_content_rejection(&self) -> bool {
+        match self {
+            AppError::HttpClient { detail, .. } => is_image_content_rejection_detail(detail),
+            _ => false,
+        }
+    }
+}
+
+/// 根据 HTTP 错误详情判断是否为「不支持图片输入」。
+pub fn is_image_content_rejection_detail(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    lower.contains("image_url")
+        || (lower.contains("expected") && lower.contains("text"))
+        || (lower.contains("unknown variant") && lower.contains("image"))
+        || lower.contains("does not support image")
+        || lower.contains("not support image")
+        || (lower.contains("multimodal") && lower.contains("not"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_rejection_detail_matches_openai_compat_error() {
+        let detail = "Failed to deserialize the JSON body into the target type: messages[1]: unknown variant `image_url`, expected `text`";
+        assert!(is_image_content_rejection_detail(detail));
+    }
 }
 
 impl From<StripPrefixError> for AppError {

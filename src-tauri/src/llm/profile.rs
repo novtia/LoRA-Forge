@@ -186,6 +186,7 @@ mod tests {
             reasoning_budget: 0,
             reasoning_effort: ReasoningEffort::Default,
             prior_caption_mode: PriorCaptionMode::Off,
+            text_only_model_ids: Vec::new(),
         }
     }
 

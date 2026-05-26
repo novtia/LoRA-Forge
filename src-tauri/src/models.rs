@@ -1239,6 +1239,20 @@ pub struct DatasetEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DatasetImagePathMapping {
+    pub old_relative_path: String,
+    pub new_relative_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchDatasetImageMutationResult {
+    pub entries: Vec<DatasetEntry>,
+    pub path_mappings: Vec<DatasetImagePathMapping>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DatasetAsset {
     pub relative_path: String,
     pub name: String,

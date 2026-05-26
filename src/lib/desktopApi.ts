@@ -7,6 +7,7 @@ import type {
   DatasetAsset,
   DatasetPreviewAsset,
   DatasetEntry,
+  BatchDatasetImageMutationResult,
   DiffusionPipeConfig,
   LlmGlobalSettings,
   LlmProvider,
@@ -283,6 +284,27 @@ export function listUntaggedImagePaths(
 ): Promise<string[]> {
   return invoke("list_untagged_image_paths", {
     input: { projectId, relativePaths },
+  });
+}
+
+export function batchRenameDatasetImages(
+  projectId: string,
+  relativePaths: string[],
+  baseName: string,
+  startIndex = 1,
+): Promise<BatchDatasetImageMutationResult> {
+  return invoke("batch_rename_dataset_images", {
+    input: { projectId, relativePaths, baseName, startIndex },
+  });
+}
+
+export function batchConvertDatasetExtensions(
+  projectId: string,
+  relativePaths: string[],
+  targetExtension: string,
+): Promise<BatchDatasetImageMutationResult> {
+  return invoke("batch_convert_dataset_extensions", {
+    input: { projectId, relativePaths, targetExtension },
   });
 }
 

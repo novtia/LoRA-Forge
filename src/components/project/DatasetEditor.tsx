@@ -10,6 +10,8 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import {
   autoTagImage,
   baiduTranslate,
+  batchConvertDatasetExtensions,
+  batchRenameDatasetImages,
   clearApiLogs,
   deleteDatasetImage,
   getDatasetAsset,
@@ -32,7 +34,8 @@ import {
   type DatasetEditorTriggerScope,
 } from "../../lib/datasetEditorPersistence";
 import { contiguousTagRangeForSelection, splitCaptionTags, charRangeForContiguousTagIndices } from "../../lib/captionSegments";
-import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry } from "../../lib/types";
+import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry, DatasetImagePathMapping } from "../../lib/types";
+import type { DatasetTargetExtension } from "./dataset-editor/DatasetEditorFileToolsPanel";
 import type { TranslatedCaptionEditorHandle } from "./TranslatedCaptionEditor";
 import { buildDatasetContextMenuItems } from "./dataset-editor/buildDatasetContextMenuItems";
 import { DatasetContextMenu } from "./dataset-editor/DatasetContextMenu";
@@ -75,6 +78,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const [previewDockOpen, setPreviewDockOpen] = useState(false);
   const [batchFlyoutOpen, setBatchFlyoutOpen] = useState(false);
   const [apiLogDrawerOpen, setApiLogDrawerOpen] = useState(false);
+  const [fileToolsFlyoutOpen, setFileToolsFlyoutOpen] = useState(false);
   const [apiLogLines, setApiLogLines] = useState<ApiLogEntry[]>([]);
   const [taggingMode, setTaggingMode] = useState<"all" | "range">("all");
   const [batchTaggingScope, setBatchTaggingScope] = useState<DatasetEditorTriggerScope>("all");
@@ -131,6 +135,11 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     defaultValue: string;
   } | null>(null);
   const [promptBusy, setPromptBusy] = useState(false);
+  const [fileToolsScope, setFileToolsScope] = useState<DatasetEditorTriggerScope>("all");
+  const [fileToolsGroupPath, setFileToolsGroupPath] = useState("");
+  const [fileRenameBaseName, setFileRenameBaseName] = useState("image");
+  const [fileRenameStartIndex, setFileRenameStartIndex] = useState("1");
+  const [fileTargetExtension, setFileTargetExtension] = useState<DatasetTargetExtension>("png");
 
   const [translatedCaption, setTranslatedCaption] = useState("");
   /** 鎷栧姩閫変腑杩炵画鏍囩鍒嗗尯鍚庢寔涔呴珮浜紙璇戞枃鏍囩涓嬫爣 + 瀛楃鍖洪棿锛夈€?*/
@@ -488,6 +497,26 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     ],
   );
 
+  const fileToolsTargetPaths = useMemo(
+    () =>
+      resolveScopedImagePaths(
+        fileToolsScope,
+        allImagePaths,
+        imagesUnderDirectory,
+        fileToolsGroupPath,
+        selectedImagePaths,
+        existingImagePathSet,
+      ),
+    [
+      allImagePaths,
+      existingImagePathSet,
+      fileToolsScope,
+      fileToolsGroupPath,
+      imagesUnderDirectory,
+      selectedImagePaths,
+    ],
+  );
+
   /** Images included in batch LLM tagging for the current batch scope UI. */
   const batchTaggingTargetEntries = useMemo(() => {
     const pathSet = new Set(
@@ -820,6 +849,101 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     },
     [projectId, reloadEntriesPreserveSelection, t],
   );
+
+  const applyFileToolsMutationResult = useCallback(
+    async (
+      fresh: DatasetEntry[],
+      pathMappings: DatasetImagePathMapping[],
+      preferredActivePath?: string | null,
+    ) => {
+      const mapping = new Map(
+        pathMappings.map((entry) => [entry.oldRelativePath, entry.newRelativePath]),
+      );
+      const remapPath = (path: string | null | undefined) => {
+        if (!path) return null;
+        return mapping.get(path) ?? path;
+      };
+
+      const previousActive = preferredActivePath ?? asset?.relativePath ?? null;
+      const newActivePath = remapPath(previousActive);
+      await reloadEntriesPreserveSelection(fresh, newActivePath);
+
+      setSelectedImagePaths((prev) => {
+        const next = new Set<string>();
+        for (const path of prev) {
+          next.add(mapping.get(path) ?? path);
+        }
+        return next;
+      });
+      setSelectionAnchorPath((prev) => remapPath(prev));
+    },
+    [asset?.relativePath, reloadEntriesPreserveSelection],
+  );
+
+  const performUnifyFilenames = useCallback(async () => {
+    const baseName = fileRenameBaseName.trim();
+    if (!baseName) {
+      setError(t("dataset.fileToolsRenameEmptyBase"));
+      return;
+    }
+    if (fileToolsTargetPaths.length === 0 || busy !== null) {
+      setError(t("dataset.fileToolsNoTargets"));
+      return;
+    }
+    const startIndex = Number.parseInt(fileRenameStartIndex.trim(), 10);
+    if (!Number.isFinite(startIndex) || startIndex < 1) {
+      setError(t("dataset.fileToolsRenameInvalidStart"));
+      return;
+    }
+
+    setBusy("file-rename");
+    setError(null);
+    try {
+      const { result, fresh } = await withDatasetSidebarRefresh(projectId, () =>
+        batchRenameDatasetImages(projectId, fileToolsTargetPaths, baseName, startIndex),
+      );
+      await applyFileToolsMutationResult(fresh, result.pathMappings);
+    } catch (e) {
+      setError(t("dataset.groupActionFailed", { error: getErrorMessage(e, "") }));
+    } finally {
+      setBusy(null);
+    }
+  }, [
+    applyFileToolsMutationResult,
+    busy,
+    fileRenameBaseName,
+    fileRenameStartIndex,
+    fileToolsTargetPaths,
+    projectId,
+    t,
+  ]);
+
+  const performUnifyExtensions = useCallback(async () => {
+    if (fileToolsTargetPaths.length === 0 || busy !== null) {
+      setError(t("dataset.fileToolsNoTargets"));
+      return;
+    }
+
+    setBusy("file-ext");
+    setError(null);
+    try {
+      const { result, fresh } = await withDatasetSidebarRefresh(projectId, () =>
+        batchConvertDatasetExtensions(projectId, fileToolsTargetPaths, fileTargetExtension),
+      );
+      await applyFileToolsMutationResult(fresh, result.pathMappings);
+    } catch (e) {
+      setError(t("dataset.groupActionFailed", { error: getErrorMessage(e, "") }));
+    } finally {
+      setBusy(null);
+    }
+  }, [
+    applyFileToolsMutationResult,
+    busy,
+    fileTargetExtension,
+    fileToolsTargetPaths,
+    projectId,
+    t,
+  ]);
 
   /** Opens the "create group" dialog using either the explicit selection set or the
    *  given directory's images when invoked from a folder row. Returns true when the
@@ -1606,9 +1730,11 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         previewDockOpen={previewDockOpen}
         batchFlyoutOpen={batchFlyoutOpen}
         apiLogDrawerOpen={apiLogDrawerOpen}
+        fileToolsFlyoutOpen={fileToolsFlyoutOpen}
         setPreviewDockOpen={setPreviewDockOpen}
         setBatchFlyoutOpen={setBatchFlyoutOpen}
         setApiLogDrawerOpen={setApiLogDrawerOpen}
+        setFileToolsFlyoutOpen={setFileToolsFlyoutOpen}
         batchTaggingScope={batchTaggingScope}
         setBatchTaggingScope={setBatchTaggingScope}
         batchTaggingGroupPath={batchTaggingGroupPath}
@@ -1630,6 +1756,26 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         previousImage={previousImage}
         nextImage={nextImage}
         openImage={openImage}
+        fileToolsScope={fileToolsScope}
+        setFileToolsScope={setFileToolsScope}
+        fileToolsGroupPath={fileToolsGroupPath}
+        setFileToolsGroupPath={setFileToolsGroupPath}
+        fileToolsFolderOptions={triggerGroupFolderOptions}
+        fileToolsTargetCount={fileToolsTargetPaths.length}
+        fileRenameBaseName={fileRenameBaseName}
+        setFileRenameBaseName={setFileRenameBaseName}
+        fileRenameStartIndex={fileRenameStartIndex}
+        setFileRenameStartIndex={setFileRenameStartIndex}
+        fileTargetExtension={fileTargetExtension}
+        setFileTargetExtension={setFileTargetExtension}
+        onApplyFileRename={() => {
+          void performUnifyFilenames();
+        }}
+        onApplyFileExtension={() => {
+          void performUnifyExtensions();
+        }}
+        fileRenameBusy={busy === "file-rename"}
+        fileExtensionBusy={busy === "file-ext"}
       />
 
       <DatasetEditorCaptionsCard

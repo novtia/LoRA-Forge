@@ -372,6 +372,16 @@ export interface DatasetPreviewAsset {
   filePath: string;
 }
 
+export interface DatasetImagePathMapping {
+  oldRelativePath: string;
+  newRelativePath: string;
+}
+
+export interface BatchDatasetImageMutationResult {
+  entries: DatasetEntry[];
+  pathMappings: DatasetImagePathMapping[];
+}
+
 export interface SampleImageEntry {
   relativePath: string;
   name: string;

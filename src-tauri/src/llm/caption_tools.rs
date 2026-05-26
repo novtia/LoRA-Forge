@@ -64,13 +64,13 @@ pub fn caption_edit_tool_definitions() -> Value {
             "type": "function",
             "function": {
                 "name": "set_caption",
-                "description": "Replace the entire caption with a new comma-separated Danbooru tag list.",
+                "description": "Replace the entire caption. Supports multi-line captions: comma-separated tag block on the first line, then natural-language lines (e.g. The image depicts..., Center image:, Upper image:). Newlines are preserved.",
                 "parameters": {
                     "type": "object",
                     "properties": {
                         "caption": {
                             "type": "string",
-                            "description": "Full new caption as comma-separated tags."
+                            "description": "Full new caption. May contain newlines between the tag block and spatial description lines."
                         }
                     },
                     "required": ["caption"]
@@ -80,8 +80,8 @@ pub fn caption_edit_tool_definitions() -> Value {
     ])
 }
 
-fn split_tags(caption: &str) -> Vec<String> {
-    caption
+fn split_tags(tag_line: &str) -> Vec<String> {
+    tag_line
         .split(',')
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -91,6 +91,25 @@ fn split_tags(caption: &str) -> Vec<String> {
 
 fn join_tags(tags: &[String]) -> String {
     tags.join(", ")
+}
+
+/// 多行 caption 时，tag 工具只作用于首行（tag 块）；其余自然语言行原样保留。
+fn split_tag_block_and_rest(caption: &str) -> (String, String) {
+    match caption.find('\n') {
+        Some(idx) => {
+            let (first, rest) = caption.split_at(idx);
+            (first.to_string(), rest.to_string())
+        }
+        None => (caption.to_string(), String::new()),
+    }
+}
+
+fn rejoin_tag_block_and_rest(tag_line: &str, rest: &str) -> String {
+    if rest.is_empty() {
+        tag_line.to_string()
+    } else {
+        format!("{tag_line}{rest}")
+    }
 }
 
 fn parse_position(value: Option<&Value>, tag_count: usize) -> usize {
@@ -123,7 +142,8 @@ pub fn apply_caption_tool_call(caption: &str, name: &str, arguments: &str) -> (S
         }
     };
 
-    let mut tags = split_tags(caption);
+    let (tag_line, rest) = split_tag_block_and_rest(caption);
+    let mut tags = split_tags(&tag_line);
 
     match name {
         "add_tags" => {
@@ -204,7 +224,7 @@ pub fn apply_caption_tool_call(caption: &str, name: &str, arguments: &str) -> (S
         }
     }
 
-    (join_tags(&tags), None)
+    (rejoin_tag_block_and_rest(&join_tags(&tags), &rest), None)
 }
 
 /// Extract tool calls from an assistant message payload.
@@ -282,5 +302,29 @@ mod tests {
     fn set_caption() {
         let (out, _) = apply_caption_tool_call("old", "set_caption", r#"{"caption":"a, b, c"}"#);
         assert_eq!(out, "a, b, c");
+    }
+
+    #[test]
+    fn set_caption_multiline() {
+        let (out, _) = apply_caption_tool_call(
+            "old",
+            "set_caption",
+            r#"{"caption":"1girl, solo\nCenter image: a girl standing."}"#,
+        );
+        assert_eq!(out, "1girl, solo\nCenter image: a girl standing.");
+    }
+
+    #[test]
+    fn add_tags_preserves_natural_language_lines() {
+        let (out, err) = apply_caption_tool_call(
+            "1girl, solo\nCenter image: standing.\nUpper image: kneeling.",
+            "add_tags",
+            r#"{"tags":"smile"}"#,
+        );
+        assert!(err.is_none());
+        assert_eq!(
+            out,
+            "1girl, solo, smile\nCenter image: standing.\nUpper image: kneeling."
+        );
     }
 }

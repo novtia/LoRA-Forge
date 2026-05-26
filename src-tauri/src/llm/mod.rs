@@ -1354,7 +1354,7 @@ fn response_excerpt(body: &str) -> String {
 ///
 /// 1. 剥离 fenced code blocks（\`\`\`lang ... \`\`\` → 内部内容）。
 /// 2. 剥离常见前缀（`Here is/Caption:/Tags:`...）。
-/// 3. 折叠空白但保留换行；按行 trim 后拼接。
+/// 3. 按行 trim、去掉空行，**保留换行**（`.join("\n")`）。
 /// 4. 循环 trim 引号 / 反引号 / 反引号外层字符，直到不再变化。
 fn sanitize_caption(raw: &str) -> String {
     let mut text = strip_fenced_code_block(raw);
@@ -1365,7 +1365,7 @@ fn sanitize_caption(raw: &str) -> String {
         .map(str::trim)
         .filter(|line| !line.is_empty())
         .collect::<Vec<_>>()
-        .join(" ");
+        .join("\n");
 
     let mut cur = collapsed.trim().to_string();
     loop {
@@ -1510,6 +1510,15 @@ mod tests {
 
         let v3 = json!({"choices":[{"finish_reason":"stop"}]});
         assert!(blocking_finish_reason(&v3).is_none());
+    }
+
+    #[test]
+    fn sanitize_preserves_newlines() {
+        let raw = "1girl, solo\nCenter image: a girl standing.\nUpper image: a boy kneeling.";
+        assert_eq!(
+            sanitize_caption(raw),
+            "1girl, solo\nCenter image: a girl standing.\nUpper image: a boy kneeling."
+        );
     }
 
     #[test]

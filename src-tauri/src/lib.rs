@@ -62,6 +62,8 @@ pub fn run() {
             commands::dataset::rename_dataset_group,
             commands::dataset::remove_dataset_group,
             commands::dataset::set_dataset_group_type,
+            commands::dataset::batch_convert_dataset_extensions,
+            commands::dataset::batch_rename_dataset_images,
             commands::dataset::list_untagged_image_paths,
             commands::training::start_training,
             commands::training::start_training_from_latest_weights,

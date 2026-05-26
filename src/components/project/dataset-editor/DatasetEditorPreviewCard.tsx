@@ -4,6 +4,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
+  FileType2,
   ScrollText,
   SidebarOpen,
   StopCircle,
@@ -16,9 +17,13 @@ import { useI18n } from "../../../lib/i18n";
 import FileAssetImage from "../../FileAssetImage";
 import { formatApiLogTime } from "./datasetEditorHelpers";
 import type { BatchProgress } from "./datasetEditorTypes";
+import {
+  DatasetEditorFileToolsPanel,
+  type DatasetTargetExtension,
+} from "./DatasetEditorFileToolsPanel";
 import { ImageScopePicker } from "./ImageScopePicker";
 import type { TriggerScopeFolderOption } from "./TriggerPositionPicker";
-import { API_LOG_DRAWER_W, BATCH_FLYOUT_W, PREVIEW_DOCK_PX } from "./layoutConstants";
+import { API_LOG_DRAWER_W, BATCH_FLYOUT_W, FILE_TOOLS_FLYOUT_W, PREVIEW_DOCK_PX } from "./layoutConstants";
 
 type Props = {
   asset: DatasetAsset | null;
@@ -28,9 +33,11 @@ type Props = {
   previewDockOpen: boolean;
   batchFlyoutOpen: boolean;
   apiLogDrawerOpen: boolean;
+  fileToolsFlyoutOpen: boolean;
   setPreviewDockOpen: (open: boolean) => void;
   setBatchFlyoutOpen: Dispatch<SetStateAction<boolean>>;
   setApiLogDrawerOpen: Dispatch<SetStateAction<boolean>>;
+  setFileToolsFlyoutOpen: Dispatch<SetStateAction<boolean>>;
   batchTaggingScope: DatasetEditorTriggerScope;
   setBatchTaggingScope: (scope: DatasetEditorTriggerScope) => void;
   batchTaggingGroupPath: string;
@@ -53,6 +60,22 @@ type Props = {
   previousImage: DatasetEntry | null;
   nextImage: DatasetEntry | null;
   openImage: (relativePath: string) => void;
+  fileToolsScope: DatasetEditorTriggerScope;
+  setFileToolsScope: (scope: DatasetEditorTriggerScope) => void;
+  fileToolsGroupPath: string;
+  setFileToolsGroupPath: (path: string) => void;
+  fileToolsFolderOptions: TriggerScopeFolderOption[];
+  fileToolsTargetCount: number;
+  fileRenameBaseName: string;
+  setFileRenameBaseName: (value: string) => void;
+  fileRenameStartIndex: string;
+  setFileRenameStartIndex: (value: string) => void;
+  fileTargetExtension: DatasetTargetExtension;
+  setFileTargetExtension: (value: DatasetTargetExtension) => void;
+  onApplyFileRename: () => void;
+  onApplyFileExtension: () => void;
+  fileRenameBusy: boolean;
+  fileExtensionBusy: boolean;
 };
 
 export function DatasetEditorPreviewCard({
@@ -63,9 +86,11 @@ export function DatasetEditorPreviewCard({
   previewDockOpen,
   batchFlyoutOpen,
   apiLogDrawerOpen,
+  fileToolsFlyoutOpen,
   setPreviewDockOpen,
   setBatchFlyoutOpen,
   setApiLogDrawerOpen,
+  setFileToolsFlyoutOpen,
   batchTaggingScope,
   setBatchTaggingScope,
   batchTaggingGroupPath,
@@ -87,6 +112,22 @@ export function DatasetEditorPreviewCard({
   previousImage,
   nextImage,
   openImage,
+  fileToolsScope,
+  setFileToolsScope,
+  fileToolsGroupPath,
+  setFileToolsGroupPath,
+  fileToolsFolderOptions,
+  fileToolsTargetCount,
+  fileRenameBaseName,
+  setFileRenameBaseName,
+  fileRenameStartIndex,
+  setFileRenameStartIndex,
+  fileTargetExtension,
+  setFileTargetExtension,
+  onApplyFileRename,
+  onApplyFileExtension,
+  fileRenameBusy,
+  fileExtensionBusy,
 }: Props) {
   const { t } = useI18n();
 
@@ -171,6 +212,7 @@ export function DatasetEditorPreviewCard({
                 setPreviewDockOpen(true);
                 setBatchFlyoutOpen(true);
                 setApiLogDrawerOpen(false);
+                setFileToolsFlyoutOpen(false);
               }}
             >
               <SidebarOpen size={16} aria-hidden />
@@ -463,6 +505,86 @@ export function DatasetEditorPreviewCard({
             </div>
           ) : null}
 
+          {previewDockOpen && fileToolsFlyoutOpen ? (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                right: PREVIEW_DOCK_PX,
+                width: FILE_TOOLS_FLYOUT_W,
+                maxWidth: `calc(100% - ${PREVIEW_DOCK_PX}px - 0.5rem)`,
+                backgroundColor: "var(--bg-card, #1e1e1e)",
+                borderLeft: "1px solid var(--border-dim)",
+                boxShadow: "-10px 0 28px rgba(0, 0, 0, 0.45)",
+                display: "flex",
+                flexDirection: "column",
+                zIndex: 15,
+                overflow: "hidden",
+              }}
+            >
+              <div
+                style={{
+                  padding: "0.85rem",
+                  borderBottom: "1px solid var(--border-dim)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontWeight: 600 }}>
+                  <FileType2 size={18} /> {t("dataset.fileToolsTitle")}
+                </div>
+                <button
+                  type="button"
+                  className="btn"
+                  style={{
+                    padding: "0.25rem",
+                    border: "none",
+                    background: "transparent",
+                  }}
+                  aria-label={t("dataset.fileToolsFlyoutClose")}
+                  title={t("dataset.fileToolsFlyoutClose")}
+                  onClick={() => setFileToolsFlyoutOpen(false)}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div
+                style={{
+                  padding: "1rem",
+                  flex: 1,
+                  minHeight: 0,
+                  overflow: "hidden",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                <DatasetEditorFileToolsPanel
+                  disabled={busy !== null}
+                  imageEntriesLength={imageEntriesLength}
+                  scope={fileToolsScope}
+                  onChangeScope={setFileToolsScope}
+                  groupPath={fileToolsGroupPath}
+                  onChangeGroupPath={setFileToolsGroupPath}
+                  folderOptions={fileToolsFolderOptions}
+                  targetCount={fileToolsTargetCount}
+                  renameBaseName={fileRenameBaseName}
+                  onChangeRenameBaseName={setFileRenameBaseName}
+                  renameStartIndex={fileRenameStartIndex}
+                  onChangeRenameStartIndex={setFileRenameStartIndex}
+                  targetExtension={fileTargetExtension}
+                  onChangeTargetExtension={setFileTargetExtension}
+                  onApplyRename={onApplyFileRename}
+                  onApplyExtension={onApplyFileExtension}
+                  renameBusy={fileRenameBusy}
+                  extensionBusy={fileExtensionBusy}
+                />
+              </div>
+            </div>
+          ) : null}
+
           {previewDockOpen && apiLogDrawerOpen ? (
             <div
               style={{
@@ -584,10 +706,30 @@ export function DatasetEditorPreviewCard({
               aria-pressed={batchFlyoutOpen}
               onClick={() => {
                 setApiLogDrawerOpen(false);
+                setFileToolsFlyoutOpen(false);
                 setBatchFlyoutOpen((open) => !open);
               }}
             >
               <Bot size={18} aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={`btn ${fileToolsFlyoutOpen ? "btn-primary" : ""}`}
+              style={{
+                padding: "0.35rem",
+                width: "2.25rem",
+                justifyContent: "center",
+              }}
+              title={t("dataset.fileToolsTitle")}
+              aria-label={t("dataset.fileToolsTitle")}
+              aria-pressed={fileToolsFlyoutOpen}
+              onClick={() => {
+                setBatchFlyoutOpen(false);
+                setApiLogDrawerOpen(false);
+                setFileToolsFlyoutOpen((open) => !open);
+              }}
+            >
+              <FileType2 size={18} aria-hidden />
             </button>
             <button
               type="button"
@@ -602,6 +744,7 @@ export function DatasetEditorPreviewCard({
               aria-pressed={apiLogDrawerOpen}
               onClick={() => {
                 setBatchFlyoutOpen(false);
+                setFileToolsFlyoutOpen(false);
                 setApiLogDrawerOpen((open) => !open);
               }}
             >
@@ -622,6 +765,7 @@ export function DatasetEditorPreviewCard({
                 setPreviewDockOpen(false);
                 setBatchFlyoutOpen(false);
                 setApiLogDrawerOpen(false);
+                setFileToolsFlyoutOpen(false);
               }}
             >
               <ChevronRight size={18} aria-hidden />

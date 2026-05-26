@@ -1,21 +1,23 @@
-//! LLM caption pipeline.
+﻿//! LLM caption pipeline.
 //!
-//! 调用图:
+//! 璋冪敤鍥?
 //!
 //! ```text
-//! auto_tag_image → generate_dataset_caption → generate_dataset_caption_once
-//!                                            ↓
+//! auto_tag_image 鈫?generate_dataset_caption 鈫?generate_dataset_caption_once
+//!                                            鈫?
 //!                                profile::classify_endpoint / is_thinking_model / build_reasoning_payload
 //! ```
 //!
-//! 失败分流逻辑（参见 `error::AppError::is_retryable`）：
+//! 澶辫触鍒嗘祦閫昏緫锛堝弬瑙?`error::AppError::is_retryable`锛夛細
 //!
-//! * `ContentFiltered` / `HttpClient` / `Validation` / `Cancelled` → 立即返回，不重试。
-//! * `HttpServer` / `Network` / `Parse` → 指数回退后重试 `caption_retry_max` 次。
+//! * `ContentFiltered` / `HttpClient` / `Validation` / `Cancelled` 鈫?绔嬪嵆杩斿洖锛屼笉閲嶈瘯銆?
+//! * `HttpServer` / `Network` / `Parse` 鈫?鎸囨暟鍥為€€鍚庨噸璇?`caption_retry_max` 娆°€?
 
-mod caption_tools;
+pub mod http;
 pub mod models_list;
 mod profile;
+pub mod prompt;
+pub mod tool_calling;
 
 use std::{
     fs,
@@ -23,13 +25,12 @@ use std::{
     path::Path,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, OnceLock,
+        Arc,
     },
     time::Duration,
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use reqwest::Client;
 use serde_json::{json, Map, Value};
 use tokio::time::sleep;
 
@@ -39,120 +40,25 @@ use crate::{
     state::AppState,
 };
 
-const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system-prompt.en.md");
-const AUTO_TAG_PROMPT: &str = "Generate a concise, training-ready caption for this image for a Stable Diffusion or LoRA dataset. Return only a comma-separated Danbooru-style tag list with no preamble and no full sentences. Include subject, appearance, clothing, pose, framing, environment, and scene lighting when visible. Do NOT include art-style or medium tags (anime, realistic, sketch, cel_shading, monochrome, illustration, etc.), quality tags (masterpiece, best_quality, score_*), or artist names — the LoRA learns rendering from pixels. Keep it factual.";
-const MODIFY_CAPTION_SYSTEM_PROMPT: &str = "You edit Danbooru-style comma-separated training captions for Stable Diffusion / LoRA datasets. \
-The user provides the current caption and natural-language edit instructions. \
-You MUST apply changes ONLY by calling the provided tools (add_tags, remove_tags, replace_tag, set_caption). \
-Do not output markdown or explanations in the final message. After tool calls the system returns the updated caption. \
-When the caption matches the user's intent, stop calling tools — do not send a summary or confirmation text.";
+use http::{
+    blocking_finish_reason, extract_error_message, extract_user_visible_caption, mime_type_for_image,
+    normalize_chat_completions_url, openrouter_extra_headers, print_llm_http_response_body_to_stderr,
+    response_excerpt, sanitize_caption, shared_http_client,
+};
+use prompt::{
+    build_user_message_content, compose_auto_tag_user_prompt, compose_modify_user_prompt,
+    effective_system_prompt, format_llm_request_for_api_log, truncate_previous_assistant_caption,
+    MODIFY_CAPTION_SYSTEM_PROMPT,
+};
+
 const MAX_CAPTION_TOOL_ROUNDS: usize = 8;
-/// Keeps multimodal payloads small; omit prior turn if exceeding this character count after trim.
-const MAX_PREVIOUS_ASSISTANT_CHARS: usize = 12_000;
-/// 用于日志截断（避免在 stderr / api log 里写出整张图的 base64）。
-const LOG_FIELD_TRUNCATE_CHARS: usize = 2000;
-const HTTP_CONNECT_TIMEOUT_SECS: u64 = 15;
-const HTTP_TOTAL_TIMEOUT_SECS: u64 = 180;
-const HTTP_POOL_IDLE_SECS: u64 = 90;
-const USER_AGENT_VALUE: &str = concat!("lora-forge/", env!("CARGO_PKG_VERSION"));
 
-/// 全局共享的 HTTP 客户端，避免每个请求都重建 TLS / 连接池。
-pub(crate) fn shared_http_client() -> &'static Client {
-    static CLIENT: OnceLock<Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        Client::builder()
-            .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
-            .timeout(Duration::from_secs(HTTP_TOTAL_TIMEOUT_SECS))
-            .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_SECS))
-            .user_agent(USER_AGENT_VALUE)
-            .build()
-            .expect("failed to build shared reqwest client")
-    })
-}
-
-fn truncate_previous_assistant_caption(raw: &str) -> String {
-    if raw.chars().count() <= MAX_PREVIOUS_ASSISTANT_CHARS {
-        return raw.to_string();
-    }
-    let take = MAX_PREVIOUS_ASSISTANT_CHARS.saturating_sub(1);
-    let mut out: String = raw.chars().take(take).collect();
-    out.push('…');
-    out
-}
-
-/// 构造单轮 user prompt：基础打标指令 + 可选的用户备注 + 可选的"参考 caption（文本嵌入版）"。
-///
-/// * `prior_caption_for_user_text` 仅在 `PriorCaptionMode::InjectAsUserExample` 时传入。
-/// * `assistant_turn_without_image` 用于"老前端没传上一张图片路径"的兼容路径——此时 prior caption
-///   作为 assistant 消息插在 user 前但**没有对应的 user 图片**，需要文本里明确告诉模型"上一条是
-///   前一张图的 caption、本次是新图、别照抄"。完整合法对话（带 prior image）则**不需要**这段提示。
-fn compose_auto_tag_user_prompt(
-    user_message: Option<&str>,
-    prior_caption_for_user_text: Option<&str>,
-    assistant_turn_without_image: bool,
-) -> String {
-    let mut body = match user_message.map(str::trim).filter(|s| !s.is_empty()) {
-        None => AUTO_TAG_PROMPT.to_string(),
-        Some(extra) => format!(
-            "{}\n\nAdditional notes from the user (treat as authoritative if they correct a misread of the image):\n{}",
-            AUTO_TAG_PROMPT, extra
-        ),
-    };
-    if assistant_turn_without_image {
-        body = format!(
-            "The assistant message above is your prior caption for a DIFFERENT image in this session. The attachment in THIS user message is a NEW image. Write a brand-new caption for only the new attachment; do not copy the prior caption. Keep the same output format your instructions require.\n\n{}",
-            body
-        );
-    }
-    if let Some(prior) = prior_caption_for_user_text {
-        body = format!(
-            "{}\n\n### Reference caption for a DIFFERENT image (do not copy; use only to align tone/format):\n{}",
-            body, prior
-        );
-    }
-    body
-}
-
-fn build_user_message_content(text: &str, image_data_url: Option<&str>, supports_vision: bool) -> Value {
-    if supports_vision {
-        if let Some(url) = image_data_url.filter(|u| !u.is_empty()) {
-            return json!([
-                {"type": "text", "text": text},
-                {"type": "image_url", "image_url": {"url": url}},
-            ]);
-        }
-    }
-    json!(text)
-}
-
-fn compose_modify_user_prompt(
-    user_instruction: &str,
-    current_caption: &str,
-    include_image_note: bool,
-) -> String {
-    let mut body = format!(
-        "Current caption (comma-separated Danbooru tags):\n{}\n\nUser edit request:\n{}",
-        current_caption.trim(),
-        user_instruction.trim()
-    );
-    if include_image_note {
-        body.push_str(
-            "\n\nAn image of the subject is attached for reference when deciding tag changes.",
-        );
-    } else {
-        body.push_str(
-            "\n\n(No image is available — edit the caption text only based on the user's request.)",
-        );
-    }
-    body.push_str("\n\nUse the provided tools to apply the requested changes.");
-    body
-}
 
 fn persist_model_as_text_only(log_sink: &AppState, model_id: &str) -> AppResult<()> {
     log_sink.with_db(|connection| crate::db::mark_model_text_only_in_global(connection, model_id))
 }
 
-/// 若上游拒绝图片输入：记录 model_id 为纯文本，并立即无图重试一次。
+/// 鑻ヤ笂娓告嫆缁濆浘鐗囪緭鍏ワ細璁板綍 model_id 涓虹函鏂囨湰锛屽苟绔嬪嵆鏃犲浘閲嶈瘯涓€娆°€?
 async fn run_with_image_fallback<F, Fut>(
     include_image: &mut bool,
     model_id: &str,
@@ -175,7 +81,7 @@ where
                     "llm",
                     "info",
                     format!(
-                        "模型 {} 不支持图片输入，已记录为纯文本模型并无感重试",
+                        "妯″瀷 {} 涓嶆敮鎸佸浘鐗囪緭鍏ワ紝宸茶褰曚负绾枃鏈ā鍨嬪苟鏃犳劅閲嶈瘯",
                         model_id
                     ),
                 );
@@ -187,7 +93,7 @@ where
     }
 }
 
-/// 统一入口：按 `tag_mode` 分发直接打标或对话修改。
+/// 缁熶竴鍏ュ彛锛氭寜 `tag_mode` 鍒嗗彂鐩存帴鎵撴爣鎴栧璇濅慨鏀广€?
 pub async fn caption_for_dataset_image(
     settings: &LlmSettings,
     image_path: &Path,
@@ -269,7 +175,7 @@ pub async fn generate_dataset_caption(
     );
     drop(image_bytes);
 
-    // 上一张图: 仅当传入路径解析为可读文件时才编码 data URL；任何 IO 失败都静默降级（continue without prior turn）。
+    // 涓婁竴寮犲浘: 浠呭綋浼犲叆璺緞瑙ｆ瀽涓哄彲璇绘枃浠舵椂鎵嶇紪鐮?data URL锛涗换浣?IO 澶辫触閮介潤榛橀檷绾э紙continue without prior turn锛夈€?
     let previous_image_data_url: Option<String> = match previous_image_path {
         Some(path) => match fs::read(path) {
             Ok(bytes) => Some(format!(
@@ -283,7 +189,7 @@ pub async fn generate_dataset_caption(
                         "llm",
                         "warn",
                         format!(
-                            "无法读取 prior image {} ({})，跳过 prior assistant turn",
+                            "鏃犳硶璇诲彇 prior image {} ({})锛岃烦杩?prior assistant turn",
                             path.display(),
                             err
                         ),
@@ -306,7 +212,7 @@ pub async fn generate_dataset_caption(
             return Err(AppError::Cancelled);
         }
         if attempt > 0 {
-            // 指数回退 + 抖动：min(8000, 600 * 2^(attempt-1) + jitter[0..400])
+            // 鎸囨暟鍥為€€ + 鎶栧姩锛歮in(8000, 600 * 2^(attempt-1) + jitter[0..400])
             let base: u64 = 600u64.saturating_mul(1u64 << (attempt - 1).min(6));
             let jitter = pseudo_jitter_ms();
             let sleep_ms = base.saturating_add(jitter).min(8000);
@@ -315,7 +221,7 @@ pub async fn generate_dataset_caption(
                     "llm",
                     "warn",
                     format!(
-                        "重试 caption {}/{} · 上次失败: {} · 等待 {}ms",
+                        "閲嶈瘯 caption {}/{} 路 涓婃澶辫触: {} 路 绛夊緟 {}ms",
                         attempt,
                         max_extra_attempts,
                         prev,
@@ -363,7 +269,7 @@ pub async fn generate_dataset_caption(
     }))
 }
 
-/// 对话修改模式：用户指令 + 现有 caption，LLM 通过内部工具修改。
+/// 瀵硅瘽淇敼妯″紡锛氱敤鎴锋寚浠?+ 鐜版湁 caption锛孡LM 閫氳繃鍐呴儴宸ュ叿淇敼銆?
 pub async fn modify_dataset_caption(
     settings: &LlmSettings,
     image_path: &Path,
@@ -405,7 +311,7 @@ pub async fn modify_dataset_caption(
                     "llm",
                     "warn",
                     format!(
-                        "重试 caption modify {}/{} · {} · 等待 {}ms",
+                        "閲嶈瘯 caption modify {}/{} 路 {} 路 绛夊緟 {}ms",
                         attempt, max_extra_attempts, prev, sleep_ms
                     ),
                 );
@@ -487,7 +393,7 @@ async fn modify_dataset_caption_once(
     ];
 
     let mut working_caption = initial_caption.trim().to_string();
-    let tools = caption_tools::caption_edit_tool_definitions();
+    let tools = tool_calling::caption_edit_tool_definitions();
     let mut tools_applied = false;
 
     for round in 0..MAX_CAPTION_TOOL_ROUNDS {
@@ -496,7 +402,7 @@ async fn modify_dataset_caption_once(
         }
 
         let request_body =
-            build_request_body_with_tools(&model_id, &messages, settings, kind, is_thinking, &tools);
+            build_request_body_with_tools_inner(&model_id, &messages, settings, kind, is_thinking, &tools);
 
         if let Some(ref st) = log_sink {
             if round == 0 {
@@ -504,7 +410,7 @@ async fn modify_dataset_caption_once(
                     "llm",
                     "info",
                     format!(
-                        "请求 caption modify · {} · model={} · with_image={} · {}",
+                        "璇锋眰 caption modify 路 {} 路 model={} 路 with_image={} 路 {}",
                         display_image,
                         model_id,
                         include_image,
@@ -516,7 +422,7 @@ async fn modify_dataset_caption_once(
                 "llm",
                 "info",
                 format!(
-                    "caption modify round {} · caption_len={}",
+                    "caption modify round {} 路 caption_len={}",
                     round + 1,
                     working_caption.len()
                 ),
@@ -533,9 +439,9 @@ async fn modify_dataset_caption_once(
         )
         .await?;
 
-        let tool_calls = caption_tools::extract_tool_calls(&payload);
+        let tool_calls = tool_calling::extract_tool_calls(&payload);
         if tool_calls.is_empty() {
-            // 工具已执行过后，模型常会再发一段说明文字；应返回工具产出的 caption，而非说明。
+            // 宸ュ叿宸叉墽琛岃繃鍚庯紝妯″瀷甯镐細鍐嶅彂涓€娈佃鏄庢枃瀛楋紱搴旇繑鍥炲伐鍏蜂骇鍑虹殑 caption锛岃€岄潪璇存槑銆?
             if tools_applied {
                 return Ok(sanitize_caption(&working_caption));
             }
@@ -563,7 +469,7 @@ async fn modify_dataset_caption_once(
 
         for (tool_id, tool_name, tool_args) in tool_calls {
             let (new_caption, tool_err) =
-                caption_tools::apply_caption_tool_call(&working_caption, &tool_name, &tool_args);
+                tool_calling::apply_caption_tool_call(&working_caption, &tool_name, &tool_args);
             working_caption = new_caption;
             let tool_content = if let Some(err) = tool_err {
                 json!({ "success": false, "error": err, "caption": working_caption })
@@ -581,7 +487,7 @@ async fn modify_dataset_caption_once(
     Ok(sanitize_caption(&working_caption))
 }
 
-fn build_request_body_with_tools(
+fn build_request_body_with_tools_inner(
     model_id: &str,
     messages: &[Value],
     settings: &LlmSettings,
@@ -632,7 +538,7 @@ async fn post_chat_completions(
             let detail = extract_error_message(&body);
             let code = status.as_u16();
             if let Some(st) = log_sink {
-                st.push_api_log("llm", "error", format!("HTTP {} · {}", code, detail));
+                st.push_api_log("llm", "error", format!("HTTP {} 路 {}", code, detail));
             }
             if code == 429 || (500..600).contains(&code) {
                 return Err(AppError::HttpServer { status: code, detail });
@@ -668,7 +574,7 @@ async fn post_chat_completions(
     run_with_cancel(work, cancel).await
 }
 
-/// 用 `now_ns` 低位做一个非加密强度的伪随机抖动，避免拉入 `rand` 依赖。
+/// 鐢?`now_ns` 浣庝綅鍋氫竴涓潪鍔犲瘑寮哄害鐨勪吉闅忔満鎶栧姩锛岄伩鍏嶆媺鍏?`rand` 渚濊禆銆?
 fn pseudo_jitter_ms() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let nanos = SystemTime::now()
@@ -726,16 +632,16 @@ async fn generate_dataset_caption_once(
         .filter(|s| !s.is_empty())
         .map(truncate_previous_assistant_caption);
 
-    // PriorCaptionMode 四种分支：
-    //  * InjectAsConversation (默认): `system → user(prompt 文本) → assistant(上一 caption) → user(当前图+prompt)`
-    //    上一轮 user **只发文本、不重复发图**，既保留合法对话结构又不让旧图触发二次安全审核。
-    //  * InjectAsFullConversation (隐式触发: 模式选 InjectAsAssistant 且前端传了 prior image)
-    //    会发完整 `user(上图)→assistant→user(当前图)` 4 条消息。该路径目前 NSFW + Gemini thinking
-    //    上失败率高，不作为默认；如有 provider 需要才用。
-    //  * InjectAsAssistant (无 prior image): `system → assistant(上一 caption) → user(当前图)`
-    //    结构不合法，user prompt 里追加 "don't copy" 提示让模型识别上一条不是凭空说的。
-    //  * InjectAsUserExample: 把上一 caption 文本嵌入当前 user prompt
-    //  * 其他（Off / 无 prior）: 纯单轮
+    // PriorCaptionMode 鍥涚鍒嗘敮锛?
+    //  * InjectAsConversation (榛樿): `system 鈫?user(prompt 鏂囨湰) 鈫?assistant(涓婁竴 caption) 鈫?user(褰撳墠鍥?prompt)`
+    //    涓婁竴杞?user **鍙彂鏂囨湰銆佷笉閲嶅鍙戝浘**锛屾棦淇濈暀鍚堟硶瀵硅瘽缁撴瀯鍙堜笉璁╂棫鍥捐Е鍙戜簩娆″畨鍏ㄥ鏍搞€?
+    //  * InjectAsFullConversation (闅愬紡瑙﹀彂: 妯″紡閫?InjectAsAssistant 涓斿墠绔紶浜?prior image)
+    //    浼氬彂瀹屾暣 `user(涓婂浘)鈫抋ssistant鈫抲ser(褰撳墠鍥?` 4 鏉℃秷鎭€傝璺緞鐩墠 NSFW + Gemini thinking
+    //    涓婂け璐ョ巼楂橈紝涓嶄綔涓洪粯璁わ紱濡傛湁 provider 闇€瑕佹墠鐢ㄣ€?
+    //  * InjectAsAssistant (鏃?prior image): `system 鈫?assistant(涓婁竴 caption) 鈫?user(褰撳墠鍥?`
+    //    缁撴瀯涓嶅悎娉曪紝user prompt 閲岃拷鍔?"don't copy" 鎻愮ず璁╂ā鍨嬭瘑鍒笂涓€鏉′笉鏄嚟绌鸿鐨勩€?
+    //  * InjectAsUserExample: 鎶婁笂涓€ caption 鏂囨湰宓屽叆褰撳墠 user prompt
+    //  * 鍏朵粬锛圤ff / 鏃?prior锛? 绾崟杞?
     enum PriorStrategy {
         TextOnlyConversation(String),
         FullConversation(String, String),
@@ -780,9 +686,9 @@ async fn generate_dataset_caption_once(
 
     match strategy {
         PriorStrategy::TextOnlyConversation(prev_caption) => {
-            // 用 base prompt 文本作为"上一轮 user 内容"——结构上是合法的多轮对话：
-            // user 问→assistant 答→user 再问。模型不会觉得 assistant 是凭空冒出来的，
-            // 同时不重复发送上一张图，token 和安全审核压力都最小。
+            // 鐢?base prompt 鏂囨湰浣滀负"涓婁竴杞?user 鍐呭"鈥斺€旂粨鏋勪笂鏄悎娉曠殑澶氳疆瀵硅瘽锛?
+            // user 闂啋assistant 绛斺啋user 鍐嶉棶銆傛ā鍨嬩笉浼氳寰?assistant 鏄嚟绌哄啋鍑烘潵鐨勶紝
+            // 鍚屾椂涓嶉噸澶嶅彂閫佷笂涓€寮犲浘锛宼oken 鍜屽畨鍏ㄥ鏍稿帇鍔涢兘鏈€灏忋€?
             let prior_user_prompt = compose_auto_tag_user_prompt(user_message, None, false);
             messages.push(json!({
                 "role": "user",
@@ -838,7 +744,7 @@ async fn generate_dataset_caption_once(
                 "llm",
                 "info",
                 format!(
-                    "请求 caption · {} · model={} · {}",
+                    "璇锋眰 caption 路 {} 路 model={} 路 {}",
                     display_log,
                     model_log,
                     endpoint_log.trim()
@@ -874,12 +780,12 @@ async fn generate_dataset_caption_once(
 
         print_llm_http_response_body_to_stderr(status.as_u16(), &body);
 
-        // 非 2xx：分流 4xx vs 5xx/429
+        // 闈?2xx锛氬垎娴?4xx vs 5xx/429
         if !status.is_success() {
             let detail = extract_error_message(&body);
             let code = status.as_u16();
             if let Some(ref st) = log {
-                st.push_api_log("llm", "error", format!("HTTP {} · {}", code, detail));
+                st.push_api_log("llm", "error", format!("HTTP {} 路 {}", code, detail));
             }
             if code == 429 || (500..600).contains(&code) {
                 return Err(AppError::HttpServer { status: code, detail });
@@ -894,7 +800,7 @@ async fn generate_dataset_caption_once(
             ))
         })?;
 
-        // 200 但带 error.code/message → 当 4xx 处理
+        // 200 浣嗗甫 error.code/message 鈫?褰?4xx 澶勭悊
         if let Some(err_obj) = payload.get("error") {
             if !matches!(err_obj, Value::Null) {
                 if let Some(detail) = err_obj
@@ -917,7 +823,7 @@ async fn generate_dataset_caption_once(
             }
         }
 
-        // refusal 字段非空 → 立即失败
+        // refusal 瀛楁闈炵┖ 鈫?绔嬪嵆澶辫触
         if let Some(refusal) = payload
             .pointer("/choices/0/message/refusal")
             .and_then(Value::as_str)
@@ -931,7 +837,7 @@ async fn generate_dataset_caption_once(
             return Err(AppError::ContentFiltered(msg));
         }
 
-        // finish_reason / native_finish_reason 命中过滤集合 → 立即失败
+        // finish_reason / native_finish_reason 鍛戒腑杩囨护闆嗗悎 鈫?绔嬪嵆澶辫触
         if let Some(reason) = blocking_finish_reason(&payload) {
             let msg = format!(
                 "LLM response was blocked by the provider's content filter ({reason})."
@@ -942,7 +848,7 @@ async fn generate_dataset_caption_once(
             return Err(AppError::ContentFiltered(msg));
         }
 
-        // 提取可见正文
+        // 鎻愬彇鍙姝ｆ枃
         let caption = extract_user_visible_caption(&payload)
             .as_deref()
             .map(sanitize_caption)
@@ -951,8 +857,8 @@ async fn generate_dataset_caption_once(
         let caption = match caption {
             Some(text) => text,
             None => {
-                // finish_reason == length 且无可见正文 → 模型把 token 全花在 reasoning 上。
-                // 重试同样会再花一次钱却不解决根因（要调高 max_tokens / reasoning_budget），所以**不重试**。
+                // finish_reason == length 涓旀棤鍙姝ｆ枃 鈫?妯″瀷鎶?token 鍏ㄨ姳鍦?reasoning 涓娿€?
+                // 閲嶈瘯鍚屾牱浼氬啀鑺变竴娆￠挶鍗翠笉瑙ｅ喅鏍瑰洜锛堣璋冮珮 max_tokens / reasoning_budget锛夛紝鎵€浠?*涓嶉噸璇?*銆?
                 if let Some("length") = payload
                     .pointer("/choices/0/finish_reason")
                     .and_then(Value::as_str)
@@ -966,8 +872,8 @@ async fn generate_dataset_caption_once(
                     }
                     return Err(AppError::OutputBudgetExhausted(msg));
                 }
-                // 其余情况（reasoning-only / 显式 PROHIBITED_CONTENT / 空 content）按内容过滤处理，
-                // **可重试**——某些 provider 同一张图在不同采样下可能给出可用 caption。
+                // 鍏朵綑鎯呭喌锛坮easoning-only / 鏄惧紡 PROHIBITED_CONTENT / 绌?content锛夋寜鍐呭杩囨护澶勭悊锛?
+                // **鍙噸璇?*鈥斺€旀煇浜?provider 鍚屼竴寮犲浘鍦ㄤ笉鍚岄噰鏍蜂笅鍙兘缁欏嚭鍙敤 caption銆?
                 return Err(AppError::ContentFiltered(format!(
                     "LLM response did not contain visible text content (likely blocked or empty). Response excerpt: {}",
                     response_excerpt(&body)
@@ -995,7 +901,7 @@ async fn generate_dataset_caption_once(
                 "llm",
                 "info",
                 format!(
-                    "响应 OK HTTP {} · caption_len={}",
+                    "鍝嶅簲 OK HTTP {} 路 caption_len={}",
                     status.as_u16(),
                     caption.len(),
                 ),
@@ -1019,7 +925,7 @@ fn build_request_body(
     body.insert("model".to_string(), Value::String(model_id.to_string()));
     body.insert("messages".to_string(), Value::Array(messages.to_vec()));
 
-    // temperature：OpenAI 思维模型上 schema 要求 == 1.0；其余按用户。
+    // temperature锛歄penAI 鎬濈淮妯″瀷涓?schema 瑕佹眰 == 1.0锛涘叾浣欐寜鐢ㄦ埛銆?
     let temperature = if matches!(kind, EndpointKind::OpenAi | EndpointKind::Auto) && is_thinking {
         1.0
     } else {
@@ -1030,10 +936,10 @@ fn build_request_body(
         json!(temperature),
     );
 
-    // max_tokens / max_completion_tokens 决策：
-    //  * 思维模型：用 max_completion_tokens（>0 时）作为可见输出预算；同时把 max_tokens 放大为 mct + reasoning_budget
-    //    以避免思考用光预算导致正文为空。
-    //  * 普通模型：仅发 max_tokens。
+    // max_tokens / max_completion_tokens 鍐崇瓥锛?
+    //  * 鎬濈淮妯″瀷锛氱敤 max_completion_tokens锛?0 鏃讹級浣滀负鍙杈撳嚭棰勭畻锛涘悓鏃舵妸 max_tokens 鏀惧ぇ涓?mct + reasoning_budget
+    //    浠ラ伩鍏嶆€濊€冪敤鍏夐绠楀鑷存鏂囦负绌恒€?
+    //  * 鏅€氭ā鍨嬶細浠呭彂 max_tokens銆?
     if is_thinking && settings.max_completion_tokens > 0 {
         body.insert(
             "max_completion_tokens".to_string(),
@@ -1044,7 +950,7 @@ fn build_request_body(
             .saturating_add(settings.reasoning_budget.max(settings.max_tokens));
         body.insert("max_tokens".to_string(), json!(total));
     } else if is_thinking {
-        // 没有显式 max_completion_tokens：把 max_tokens 自动放大 reasoning_budget，避免思考耗尽
+        // 娌℃湁鏄惧紡 max_completion_tokens锛氭妸 max_tokens 鑷姩鏀惧ぇ reasoning_budget锛岄伩鍏嶆€濊€冭€楀敖
         let expanded = settings.max_tokens.saturating_add(settings.reasoning_budget);
         body.insert("max_tokens".to_string(), json!(expanded));
     } else {
@@ -1058,387 +964,6 @@ fn build_request_body(
     Value::Object(body)
 }
 
-fn openrouter_extra_headers(kind: EndpointKind) -> &'static [(&'static str, &'static str)] {
-    match kind {
-        EndpointKind::OpenRouter => &[
-            ("HTTP-Referer", "https://lora-forge.local"),
-            ("X-Title", "LoRA Forge"),
-        ],
-        _ => &[],
-    }
-}
-
-fn effective_system_prompt(settings: &LlmSettings) -> &str {
-    if settings.system_prompt.trim().is_empty() {
-        DEFAULT_SYSTEM_PROMPT.trim()
-    } else {
-        settings.system_prompt.trim()
-    }
-}
-
-/// API 面板日志：紧凑单行 JSON，含 model / endpoint_kind / has_image / image_bytes / max_tokens / reasoning。
-fn format_llm_request_for_api_log(
-    body: &Value,
-    kind: EndpointKind,
-    image_bytes: usize,
-    mime: &str,
-    is_thinking: bool,
-) -> String {
-    let mut compact = serde_json::Map::new();
-    if let Some(model) = body.get("model") {
-        compact.insert("model".to_string(), model.clone());
-    }
-    compact.insert("endpoint_kind".to_string(), json!(endpoint_kind_label(kind)));
-    compact.insert("is_thinking".to_string(), json!(is_thinking));
-    compact.insert(
-        "has_image".to_string(),
-        json!(image_bytes > 0),
-    );
-    compact.insert("image_bytes".to_string(), json!(image_bytes));
-    compact.insert("image_mime".to_string(), json!(mime));
-    if let Some(messages) = body.get("messages").and_then(Value::as_array) {
-        compact.insert("messages_count".to_string(), json!(messages.len()));
-    }
-    if let Some(mt) = body.get("max_tokens") {
-        compact.insert("max_tokens".to_string(), mt.clone());
-    }
-    if let Some(mct) = body.get("max_completion_tokens") {
-        compact.insert("max_completion_tokens".to_string(), mct.clone());
-    }
-    if let Some(t) = body.get("temperature") {
-        compact.insert("temperature".to_string(), t.clone());
-    }
-    if let Some(r) = body.get("reasoning") {
-        compact.insert("reasoning".to_string(), r.clone());
-    }
-    if let Some(r) = body.get("reasoning_effort") {
-        compact.insert("reasoning_effort".to_string(), r.clone());
-    }
-    if let Some(r) = body.get("thinking") {
-        compact.insert("thinking".to_string(), r.clone());
-    }
-    serde_json::to_string(&Value::Object(compact)).unwrap_or_else(|_| "{}".to_string())
-}
-
-fn endpoint_kind_label(kind: EndpointKind) -> &'static str {
-    match kind {
-        EndpointKind::Auto => "auto",
-        EndpointKind::OpenAi => "openai",
-        EndpointKind::OpenRouter => "openrouter",
-        EndpointKind::AnthropicCompat => "anthropic",
-    }
-}
-
-fn normalize_chat_completions_url(endpoint_url: &str) -> AppResult<String> {
-    let trimmed = endpoint_url.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        return Err(AppError::Validation("Endpoint URL is required".to_string()));
-    }
-
-    if trimmed.ends_with("/chat/completions") {
-        Ok(trimmed.to_string())
-    } else {
-        Ok(format!("{trimmed}/chat/completions"))
-    }
-}
-
-/// 将本次 chat/completions 的 HTTP 响应体打印到 stderr（开发机 `tauri dev` 终端可见）。
-///
-/// 解析为 JSON 后会递归把过长字符串字段截断为 `…(truncated N bytes)`，避免把整张图的 base64 写进日志。
-fn print_llm_http_response_body_to_stderr(http_status: u16, body: &str) {
-    eprintln!("[llm] ========== HTTP {http_status} ==========");
-    match serde_json::from_str::<Value>(body) {
-        Ok(mut value) => {
-            truncate_large_string_fields(&mut value, LOG_FIELD_TRUNCATE_CHARS);
-            let text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| body.to_string());
-            eprintln!("{text}");
-        }
-        Err(_) => {
-            let head: String = body.chars().take(LOG_FIELD_TRUNCATE_CHARS).collect();
-            eprintln!("{head}");
-            if body.chars().count() > LOG_FIELD_TRUNCATE_CHARS {
-                eprintln!(
-                    "…(truncated {} chars)",
-                    body.chars().count() - LOG_FIELD_TRUNCATE_CHARS
-                );
-            }
-        }
-    }
-    eprintln!("[llm] ========== end ==========");
-}
-
-fn truncate_large_string_fields(value: &mut Value, max_chars: usize) {
-    match value {
-        Value::String(s) => {
-            // 特别处理 data URL：保留 mime 头 + 字节数提示，丢弃 base64 主体
-            if let Some(rest) = s.strip_prefix("data:") {
-                if let Some((mime, payload)) = rest.split_once(',') {
-                    let bytes_hint = payload.len();
-                    *s = format!("data:{mime},...(omitted {bytes_hint} chars)");
-                    return;
-                }
-            }
-            let char_count = s.chars().count();
-            if char_count > max_chars {
-                let truncated: String = s.chars().take(max_chars).collect();
-                *s = format!(
-                    "{truncated}…(truncated {} chars)",
-                    char_count - max_chars
-                );
-            }
-        }
-        Value::Array(arr) => {
-            for v in arr.iter_mut() {
-                truncate_large_string_fields(v, max_chars);
-            }
-        }
-        Value::Object(map) => {
-            for (_, v) in map.iter_mut() {
-                truncate_large_string_fields(v, max_chars);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// 解析错误消息：优先 `error.message`，否则截断 body 前 400 字符。
-fn extract_error_message(body: &str) -> String {
-    serde_json::from_str::<Value>(body)
-        .ok()
-        .and_then(|payload| {
-            payload
-                .get("error")
-                .filter(|v| !matches!(v, Value::Null))
-                .and_then(|error| {
-                    error
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string)
-                        .or_else(|| error.as_str().map(ToString::to_string))
-                })
-        })
-        .unwrap_or_else(|| body.trim().chars().take(400).collect())
-}
-
-/// 严格白名单：只采纳 `choices[0].message.content` 是 string、或者数组里 `type` 命中
-/// `{"text","output_text"}`（或缺省）的分片，**不**递归到 `reasoning` / `thought` / `image_url` 等。
-fn extract_user_visible_caption(payload: &Value) -> Option<String> {
-    let content = payload.pointer("/choices/0/message/content");
-    if let Some(text) = extract_caption_from_message_content(content) {
-        return Some(text);
-    }
-    // OpenAI legacy completions 端点
-    payload
-        .pointer("/choices/0/text")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(str::to_string)
-}
-
-fn extract_caption_from_message_content(content: Option<&Value>) -> Option<String> {
-    match content? {
-        Value::Null => None,
-        Value::String(s) => non_empty_text(s),
-        Value::Array(parts) => {
-            let mut chunks: Vec<String> = Vec::new();
-            for part in parts {
-                let Value::Object(map) = part else {
-                    continue;
-                };
-                let typ_raw = map.get("type").and_then(Value::as_str);
-                let typ = typ_raw.unwrap_or("text").trim().to_ascii_lowercase();
-
-                if is_hidden_or_non_text_part(&typ) {
-                    continue;
-                }
-                // 只接受白名单 type；其它一律忽略，避免穿透到 reasoning_details / images / refusal 等
-                if typ_raw.is_some()
-                    && !matches!(typ.as_str(), "text" | "output_text" | "input_text")
-                {
-                    continue;
-                }
-
-                if let Some(t) = map.get("text").and_then(Value::as_str) {
-                    if let Some(trimmed) = non_empty_text(t) {
-                        chunks.push(trimmed);
-                    }
-                } else if let Some(t) = map.get("content").and_then(Value::as_str) {
-                    if let Some(trimmed) = non_empty_text(t) {
-                        chunks.push(trimmed);
-                    }
-                }
-            }
-            non_empty_text(&chunks.join(" "))
-        }
-        Value::Object(map) => {
-            // 个别 provider 直接给 {text:"..."}；只接受确定是文本的字段
-            map.get("text")
-                .and_then(Value::as_str)
-                .and_then(non_empty_text)
-                .or_else(|| {
-                    map.get("content")
-                        .and_then(Value::as_str)
-                        .and_then(non_empty_text)
-                })
-        }
-        _ => None,
-    }
-}
-
-/// 任何包含 `reasoning|thinking|thought|image_url|input_image|refusal` 的 part type 都视为「非可见正文」。
-fn is_hidden_or_non_text_part(typ: &str) -> bool {
-    typ.contains("reasoning")
-        || typ.contains("thinking")
-        || typ.contains("thought")
-        || typ == "image_url"
-        || typ == "input_image"
-        || typ == "refusal"
-}
-
-/// 命中以下任一 `finish_reason` / `native_finish_reason` 即视为内容审核阻断。
-fn blocking_finish_reason(payload: &Value) -> Option<String> {
-    const BLOCKED: &[&str] = &[
-        "content_filter",
-        "prohibited_content",
-        "safety",
-        "recitation",
-        "blocklist",
-        "blocked",
-    ];
-
-    let pick = |val: &Value| -> Option<String> {
-        let s = val.as_str()?.trim();
-        let lower = s.to_ascii_lowercase().replace('-', "_");
-        if BLOCKED.iter().any(|b| lower.contains(b)) {
-            Some(s.to_string())
-        } else {
-            None
-        }
-    };
-
-    if let Some(s) = payload
-        .pointer("/choices/0/finish_reason")
-        .and_then(pick)
-    {
-        return Some(s);
-    }
-    if let Some(s) = payload
-        .pointer("/choices/0/native_finish_reason")
-        .and_then(pick)
-    {
-        return Some(s);
-    }
-    None
-}
-
-fn non_empty_text(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
-
-fn response_excerpt(body: &str) -> String {
-    let excerpt = body.trim().chars().take(400).collect::<String>();
-    if excerpt.is_empty() {
-        "<empty response>".to_string()
-    } else {
-        excerpt
-    }
-}
-
-/// 清洗 caption：
-///
-/// 1. 剥离 fenced code blocks（\`\`\`lang ... \`\`\` → 内部内容）。
-/// 2. 剥离常见前缀（`Here is/Caption:/Tags:`...）。
-/// 3. 按行 trim、去掉空行，**保留换行**（`.join("\n")`）。
-/// 4. 循环 trim 引号 / 反引号 / 反引号外层字符，直到不再变化。
-fn sanitize_caption(raw: &str) -> String {
-    let mut text = strip_fenced_code_block(raw);
-    text = strip_leading_preamble(&text);
-
-    let collapsed: String = text
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let mut cur = collapsed.trim().to_string();
-    loop {
-        let stripped = cur
-            .trim()
-            .trim_matches('`')
-            .trim_matches('"')
-            .trim_matches('\'')
-            .trim_matches('“')
-            .trim_matches('”')
-            .trim_matches('‘')
-            .trim_matches('’')
-            .to_string();
-        if stripped == cur {
-            break;
-        }
-        cur = stripped;
-    }
-    cur
-}
-
-fn strip_fenced_code_block(raw: &str) -> String {
-    let trimmed = raw.trim();
-    if !trimmed.starts_with("```") {
-        return raw.to_string();
-    }
-    // 找到首个换行（跳过 ```lang 语言行），与最后一个 ``` 闭合
-    let after_open = match trimmed.find('\n') {
-        Some(i) => &trimmed[i + 1..],
-        None => return raw.to_string(),
-    };
-    if let Some(end) = after_open.rfind("```") {
-        after_open[..end].to_string()
-    } else {
-        after_open.to_string()
-    }
-}
-
-fn strip_leading_preamble(raw: &str) -> String {
-    let trimmed = raw.trim_start();
-    let lower = trimmed.to_ascii_lowercase();
-    const PREFIXES: &[&str] = &[
-        "here is a caption:",
-        "here is the caption:",
-        "here's a caption:",
-        "here's the caption:",
-        "caption:",
-        "tags:",
-        "output:",
-        "result:",
-    ];
-    for prefix in PREFIXES {
-        if lower.starts_with(prefix) {
-            return trimmed[prefix.len()..].trim_start().to_string();
-        }
-    }
-    raw.to_string()
-}
-
-fn mime_type_for_image(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("png") => "image/png",
-        Some("webp") => "image/webp",
-        Some("bmp") => "image/bmp",
-        _ => "application/octet-stream",
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1554,8 +1079,8 @@ mod tests {
 
     #[test]
     fn prior_caption_mode_default_is_text_only_conversation() {
-        // 默认值必须是 InjectAsConversation —— NSFW + Gemini thinking 上 InjectAsAssistant + image
-        // 会让模型在 PROHIBITED_CONTENT 路径上把 token 全部消耗在 reasoning 上，是已知踩坑。
+        // 榛樿鍊煎繀椤绘槸 InjectAsConversation 鈥斺€?NSFW + Gemini thinking 涓?InjectAsAssistant + image
+        // 浼氳妯″瀷鍦?PROHIBITED_CONTENT 璺緞涓婃妸 token 鍏ㄩ儴娑堣€楀湪 reasoning 涓婏紝鏄凡鐭ヨ俯鍧戙€?
         let mode = crate::models::PriorCaptionMode::default();
         assert_eq!(mode, crate::models::PriorCaptionMode::InjectAsConversation);
     }

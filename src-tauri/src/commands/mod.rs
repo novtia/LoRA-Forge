@@ -1,9 +1,13 @@
+/**
+ * @file commands/mod.rs
+ * @description Tauri 命令层入口：声明各子模块，暴露 respond() 工具。
+ */
+
 pub mod api_log;
-pub mod baidu_translate;
-pub mod config;
 pub mod dataset;
-pub mod llm_provider;
+pub mod llm;
 pub mod projects;
+pub mod settings;
 pub mod system;
 pub mod training;
 

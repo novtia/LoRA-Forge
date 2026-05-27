@@ -1,6 +1,6 @@
 /**
  * @file commands/dataset/caption.rs
- * @description Caption 鐩稿叧鍛戒护锛氳鍐?鍒犻櫎鍥剧墖+caption銆丩LM 鑷姩鎵撴爣銆佸彇娑堛€佸垪鍑烘湭鎵撴爣璺緞銆?
+ * @description Caption 相关命令：读写/删除图片+caption、LLM 自动打标、取消、列出未打标路径。
  */
 
 use std::{

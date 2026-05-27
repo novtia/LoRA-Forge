@@ -1,6 +1,6 @@
 ﻿/**
  * @file commands/dataset/batch.rs
- * @description 鎵归噺鎿嶄綔鍛戒护锛歚batch_rename_dataset_images`銆乣batch_convert_dataset_extensions`銆?
+ * @description 批量操作命令：`batch_rename_dataset_images`、`batch_convert_dataset_extensions`。
  */
 
 use std::{

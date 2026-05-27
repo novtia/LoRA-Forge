@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cancelLlmCaption } from "../../../lib/desktopApi";
 import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
-import type { ApiLogEntry, DatasetAsset, DatasetEntry } from "../../../lib/types";
+import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry } from "../../../lib/types";
 import { useI18n } from "../../../lib/i18n";
 import FileAssetImage from "../../FileAssetImage";
 import { formatApiLogTime } from "./datasetEditorHelpers";
@@ -53,6 +53,12 @@ type Props = {
   setOnlyUntagged: (v: boolean) => void;
   /** null = not yet computed; number = count of untagged images in current batch scope */
   untaggedCount: number | null;
+  llmTagMode: CaptionTagMode;
+  setLlmTagMode: (mode: CaptionTagMode) => void;
+  llmDirectTagHint: string;
+  setLlmDirectTagHint: (value: string) => void;
+  llmConversationHint: string;
+  setLlmConversationHint: (value: string) => void;
   apiLogLines: ApiLogEntry[];
   runBatchTagging: () => Promise<void>;
   refreshApiLogs: () => Promise<void>;
@@ -105,6 +111,12 @@ export function DatasetEditorPreviewCard({
   onlyUntagged,
   setOnlyUntagged,
   untaggedCount,
+  llmTagMode,
+  setLlmTagMode,
+  llmDirectTagHint,
+  setLlmDirectTagHint,
+  llmConversationHint,
+  setLlmConversationHint,
   apiLogLines,
   runBatchTagging,
   refreshApiLogs,
@@ -130,6 +142,9 @@ export function DatasetEditorPreviewCard({
   fileExtensionBusy,
 }: Props) {
   const { t } = useI18n();
+  const isConversation = llmTagMode === "conversationModify";
+  const hintValue = isConversation ? llmConversationHint : llmDirectTagHint;
+  const setHintValue = isConversation ? setLlmConversationHint : setLlmDirectTagHint;
 
   return (
     <div
@@ -295,7 +310,96 @@ export function DatasetEditorPreviewCard({
                   }}
                 />
 
-                {/* Only-untagged toggle */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  <label className="form-label">{t("dataset.llmTagMode")}</label>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn"
+                      aria-pressed={llmTagMode === "direct"}
+                      disabled={busy !== null}
+                      onClick={() => setLlmTagMode("direct")}
+                      style={{
+                        justifyContent: "center",
+                        padding: "0.75rem",
+                        borderColor:
+                          llmTagMode === "direct" ? "var(--accent-acid)" : "var(--border-dim)",
+                        background:
+                          llmTagMode === "direct"
+                            ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
+                            : "transparent",
+                        color:
+                          llmTagMode === "direct" ? "var(--text-main)" : "var(--text-muted)",
+                      }}
+                    >
+                      {t("dataset.llmTagModeDirect")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      aria-pressed={llmTagMode === "conversationModify"}
+                      disabled={busy !== null}
+                      onClick={() => setLlmTagMode("conversationModify")}
+                      style={{
+                        justifyContent: "center",
+                        padding: "0.75rem",
+                        borderColor:
+                          llmTagMode === "conversationModify"
+                            ? "var(--accent-acid)"
+                            : "var(--border-dim)",
+                        background:
+                          llmTagMode === "conversationModify"
+                            ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
+                            : "transparent",
+                        color:
+                          llmTagMode === "conversationModify"
+                            ? "var(--text-main)"
+                            : "var(--text-muted)",
+                      }}
+                    >
+                      {t("dataset.llmTagModeConversation")}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+                    {isConversation
+                      ? t("dataset.llmTagModeHintConversation")
+                      : t("dataset.llmTagModeHintDirect")}
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  <label className="form-label">
+                    {isConversation
+                      ? t("dataset.llmUserHintLabelConversation")
+                      : t("dataset.llmUserHintLabel")}
+                  </label>
+                  <textarea
+                    className="form-input"
+                    style={{ minHeight: "4.5rem", resize: "vertical" }}
+                    placeholder={
+                      isConversation
+                        ? t("dataset.llmUserHintPlaceholderConversation")
+                        : t("dataset.llmUserHintPlaceholder")
+                    }
+                    value={hintValue}
+                    disabled={busy !== null}
+                    onChange={(e) => setHintValue(e.target.value)}
+                    spellCheck
+                  />
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+                    {isConversation
+                      ? t("dataset.batchConversationHintDesc")
+                      : t("dataset.llmUserHintDesc")}
+                  </div>
+                </div>
+
+                {!isConversation ? (
                 <label
                   style={{
                     display: "flex",
@@ -333,6 +437,7 @@ export function DatasetEditorPreviewCard({
                     </span>
                   ) : null}
                 </label>
+                ) : null}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                   <label className="form-label">{t("dataset.taggingMode")}</label>
@@ -416,11 +521,16 @@ export function DatasetEditorPreviewCard({
                   }}
                 >
                   <span>{t("dataset.totalImagesInScope", { total: batchTaggingTargetCount })}</span>
-                  {onlyUntagged && untaggedCount !== null && (
+                  {!isConversation && onlyUntagged && untaggedCount !== null && (
                     <span style={{ color: untaggedCount === 0 ? "var(--text-muted)" : "var(--accent-acid)" }}>
                       {t("dataset.untaggedInScope", { count: untaggedCount, total: batchTaggingTargetCount })}
                     </span>
                   )}
+                  {isConversation ? (
+                    <span style={{ color: "var(--text-muted)" }}>
+                      {t("dataset.batchConversationScopeHint")}
+                    </span>
+                  ) : null}
                 </div>
 
                 {batchProgress ? (
@@ -475,7 +585,7 @@ export function DatasetEditorPreviewCard({
                     disabled={
                       batchTaggingTargetCount === 0 ||
                       busy !== null ||
-                      (onlyUntagged && untaggedCount === 0)
+                      (!isConversation && onlyUntagged && untaggedCount === 0)
                     }
                     onClick={() => void runBatchTagging()}
                   >

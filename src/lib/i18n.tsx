@@ -124,6 +124,10 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.untaggedCount": "{{count}} untagged",
     "dataset.untaggedInScope": "{{count}} / {{total}} untagged",
     "dataset.batchNoUntagged": "All images in scope already have captions.",
+    "dataset.batchNoCaptionsToModify": "No images with existing captions in scope for conversation edit.",
+    "dataset.batchConversationHintDesc":
+      "Applied to every image in scope. Each image must already have a non-empty caption.",
+    "dataset.batchConversationScopeHint": "Only images with existing captions will be modified.",
     "dataset.batchTaggingScope.label": "Batch tagging applies to",
     "dataset.batchTaggingScope.folderMenuAria": "Choose folder for batch tagging",
     "dataset.batchTaggingScope.selectionHint":
@@ -802,6 +806,10 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.untaggedCount": "{{count}} 张未打标",
     "dataset.untaggedInScope": "{{count}} / {{total}} 张未打标",
     "dataset.batchNoUntagged": "当前范围内所有图片均已有标签。",
+    "dataset.batchNoCaptionsToModify": "当前范围内没有已有 caption 的图片，无法对话修改。",
+    "dataset.batchConversationHintDesc":
+      "将应用于范围内每张图片；每张图片须已有非空 caption。",
+    "dataset.batchConversationScopeHint": "仅会修改已有 caption 的图片。",
     "dataset.batchTaggingScope.label": "批量打标作用范围",
     "dataset.batchTaggingScope.folderMenuAria": "选择批量打标的文件夹",
     "dataset.batchTaggingScope.selectionHint":

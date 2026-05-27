@@ -1,6 +1,6 @@
 ﻿/**
  * @file commands/dataset/group.rs
- * @description 鍒嗙粍鍛戒护锛氬垱寤虹粍/绉诲姩鍥剧墖/閲嶅懡鍚嶇粍/鍒犻櫎缁?璁剧疆缁勭被鍨嬨€?
+ * @description 分组命令：创建组/移动图片/重命名组/删除组/设置组类型。
  */
 
 use std::{
@@ -112,7 +112,7 @@ pub(super) fn sanitize_group_segment(name: &str) -> AppResult<String> {
     Ok(truncated)
 }
 
-/// Resolves a dataset-root鈥搑elative parent directory; an empty/`"."`/`"/"` input maps to
+/// Resolves a dataset-root-relative parent directory; an empty/`"."`/`"/"` input maps to
 /// the dataset root itself.
 pub(super) fn resolve_dataset_parent_dir(dataset_root: &Path, parent_relative: &str) -> AppResult<PathBuf> {
     let trimmed = parent_relative.trim().trim_matches('/');
@@ -128,9 +128,9 @@ pub(super) fn resolve_dataset_parent_dir(dataset_root: &Path, parent_relative: &
     Ok(resolved)
 }
 
-/// Generates `<base>`, `<base> (2)`, `<base> (3)`鈥?until an unused folder name is
+/// Generates `<base>`, `<base> (2)`, `<base> (3)`… until an unused folder name is
 /// found inside `parent_dir`. Used when the user-supplied group name collides with
-/// an existing sibling 鈥?the caller still saves the user's intent verbatim where
+/// an existing sibling — the caller still saves the user's intent verbatim where
 /// possible and only falls back to a numeric suffix when needed.
 fn unique_group_folder(parent_dir: &Path, base: &str) -> PathBuf {
     let candidate = parent_dir.join(base);
@@ -324,7 +324,7 @@ fn rename_dataset_group_inner(
         )));
     }
 
-    // Derive old/new relative paths from the input string 鈥?avoids canonicalize on
+    // Derive old/new relative paths from the input string — avoids canonicalize on
     // the not-yet-existing target path.
     let old_relative = input.group_relative_path.trim_matches('/').to_string();
     let new_relative = match old_relative.rfind('/') {

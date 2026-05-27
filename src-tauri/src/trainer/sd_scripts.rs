@@ -1,7 +1,7 @@
 ﻿/**
  * @file trainer/sd_scripts.rs
- * @description sd-scripts LoRA 璁粌鍣細鍛戒护鏋勫缓銆佹暟鎹泦 TOML 閰嶇疆鐢熸垚銆佸惎鍔?鏆傚仠/鎭㈠/缁堟銆?
- *   diffusion-pipe 鍏辩敤鐨勬枃浠剁郴缁熷伐鍏凤紙`collect_dataset_image_dirs`銆乣toml_string`锛変篃鍦ㄦ澶勩€?
+ * @description sd-scripts LoRA 训练器：命令构建、数据集 TOML 配置生成、启动/暂停/恢复/终止。
+ *   diffusion-pipe 共用的文件系统工具（`collect_dataset_image_dirs`、`toml_string`）也在此处。
  */
 
 use std::{
@@ -271,7 +271,7 @@ fn build_training_command(
         None
     };
 
-    // `training_length_mode`: steps 鈫?`--max_train_steps`, epochs 鈫?`--max_train_epochs` (mutually exclusive).
+    // `training_length_mode`: steps → `--max_train_steps`, epochs → `--max_train_epochs` (mutually exclusive).
     let resolution = parse_resolution(&config.resolution)?;
     let is_anima = config.training_script.trim() == "anima_train_network.py";
     let network_module = if is_anima {

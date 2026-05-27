@@ -1,6 +1,6 @@
 ﻿/**
  * @file commands/dataset/browse.rs
- * @description 鏁版嵁闆嗘祻瑙堝懡浠わ細鍒楃洰褰曘€佽幏鍙栬祫浜с€侀瑙堝浘鐢熸垚銆佹牱鍥惧垪琛ㄣ€?
+ * @description 数据集浏览命令：列目录、获取资产、预览图生成、样图列表。
  */
 
 use std::{

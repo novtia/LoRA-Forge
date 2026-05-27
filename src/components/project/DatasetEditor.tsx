@@ -1474,6 +1474,13 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       return;
     }
 
+    const isConversation = llmTagMode === "conversationModify";
+    const hint = (isConversation ? llmConversationHint : llmDirectTagHint).trim();
+    if (isConversation && hint.length === 0) {
+      setError(t("dataset.modifyCaptionNeedHint"));
+      return;
+    }
+
     let targets: DatasetEntry[];
     if (taggingMode === "all") {
       targets = batchTaggingTargetEntries;
@@ -1486,19 +1493,33 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       targets = batchTaggingTargetEntries.slice(range.start - 1, range.end);
     }
 
-    // When "only untagged" is active, filter to images that have no caption yet.
-    if (onlyUntagged && targets.length > 0) {
-      const untaggedPaths = new Set(
+    if (!isConversation && onlyUntagged && targets.length > 0) {
+      const untaggedPathSet = new Set(
         await listUntaggedImagePaths(
           projectId,
           targets.map((e) => e.relativePath),
         ),
       );
-      targets = targets.filter((e) => untaggedPaths.has(e.relativePath));
+      targets = targets.filter((e) => untaggedPathSet.has(e.relativePath));
+    }
+
+    if (isConversation && targets.length > 0) {
+      const withCaption: DatasetEntry[] = [];
+      for (const entry of targets) {
+        try {
+          const raw = await readCaption(projectId, entry.relativePath);
+          if (raw.trim().length > 0) {
+            withCaption.push(entry);
+          }
+        } catch {
+          // skip images whose caption cannot be read
+        }
+      }
+      targets = withCaption;
     }
 
     if (targets.length === 0) {
-      setError(t("dataset.batchNoUntagged"));
+      setError(isConversation ? t("dataset.batchNoCaptionsToModify") : t("dataset.batchNoUntagged"));
       return;
     }
 
@@ -1529,22 +1550,41 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         });
 
         try {
-          const hint = llmDirectTagHint.trim();
-          const nextCaption = await autoTagImage(
-            projectId,
-            entry.relativePath,
-            hint.length > 0 ? hint : undefined,
-            previousAssistantCaption,
-            previousImageRelativePath,
-          );
-          await writeCaption(projectId, entry.relativePath, nextCaption);
-          const trimmedNew = nextCaption.trim();
-          if (trimmedNew.length > 0) {
-            previousAssistantCaption = trimmedNew;
-            previousImageRelativePath = entry.relativePath;
+          let nextCaption: string;
+          if (isConversation) {
+            const currentCaption = (await readCaption(projectId, entry.relativePath)).trim();
+            if (currentCaption.length === 0) {
+              continue;
+            }
+            nextCaption = await autoTagImage(
+              projectId,
+              entry.relativePath,
+              hint,
+              undefined,
+              undefined,
+              llmTagMode,
+              currentCaption,
+            );
           } else {
-            previousAssistantCaption = undefined;
-            previousImageRelativePath = undefined;
+            nextCaption = await autoTagImage(
+              projectId,
+              entry.relativePath,
+              hint.length > 0 ? hint : undefined,
+              previousAssistantCaption,
+              previousImageRelativePath,
+              llmTagMode,
+            );
+          }
+          await writeCaption(projectId, entry.relativePath, nextCaption);
+          if (!isConversation) {
+            const trimmedNew = nextCaption.trim();
+            if (trimmedNew.length > 0) {
+              previousAssistantCaption = trimmedNew;
+              previousImageRelativePath = entry.relativePath;
+            } else {
+              previousAssistantCaption = undefined;
+              previousImageRelativePath = undefined;
+            }
           }
           ok++;
           if (currentImage?.relativePath === entry.relativePath) {
@@ -1555,8 +1595,10 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
             userCancelled = true;
             break;
           }
-          previousAssistantCaption = undefined;
-          previousImageRelativePath = undefined;
+          if (!isConversation) {
+            previousAssistantCaption = undefined;
+            previousImageRelativePath = undefined;
+          }
           fail++;
           lastErr = getErrorMessage(itemError, t("errors.generateCaption"));
         }
@@ -1578,12 +1620,14 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     currentImage?.relativePath,
     imageEntries.length,
     imageRange,
+    llmConversationHint,
+    llmDirectTagHint,
+    llmTagMode,
     loadAsset,
     onlyUntagged,
     projectId,
     taggingMode,
     t,
-    llmDirectTagHint,
   ]);
 
   const applyTriggerWordToAll = useCallback(async () => {
@@ -1749,6 +1793,12 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         onlyUntagged={onlyUntagged}
         setOnlyUntagged={setOnlyUntagged}
         untaggedCount={untaggedCount}
+        llmTagMode={llmTagMode}
+        setLlmTagMode={setLlmTagMode}
+        llmDirectTagHint={llmDirectTagHint}
+        setLlmDirectTagHint={setLlmDirectTagHint}
+        llmConversationHint={llmConversationHint}
+        setLlmConversationHint={setLlmConversationHint}
         apiLogLines={apiLogLines}
         runBatchTagging={runBatchTagging}
         refreshApiLogs={refreshApiLogs}

@@ -28,7 +28,7 @@ use super::{
 };
 use super::sd_scripts::{collect_dataset_image_dirs, toml_string};
 // diffusion-pipe WSL training support
-// 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// ─────────────────────────────────────────────────────────────────────────────
 
 /// Convert a Windows path like `D:\foo\bar` to a WSL path `/mnt/d/foo/bar`.
 /// If the path is already a Unix-style path (starts with `/`), return as-is.
@@ -40,7 +40,7 @@ pub fn windows_path_to_wsl(path: &str) -> String {
     if trimmed.starts_with('/') {
         return trimmed.to_string();
     }
-    // Handle UNC prefix stripped paths like `\\?\D:\foo` 鈫?skip prefix
+    // Handle UNC prefix stripped paths like `\\?\D:\foo` → skip prefix
     let normalized = if trimmed.starts_with("\\\\?\\") {
         &trimmed[4..]
     } else {
@@ -107,7 +107,7 @@ fn write_diffusion_pipe_dataset_toml(
         vec![dataset_win.to_path_buf()]
     });
 
-    // Filter out regularization directories 鈥?diffusion-pipe has no is_reg concept.
+    // Filter out regularization directories — diffusion-pipe has no is_reg concept.
     let training_dirs: Vec<&PathBuf> = image_dirs
         .iter()
         .filter(|dir| {
@@ -120,7 +120,7 @@ fn write_diffusion_pipe_dataset_toml(
         .collect();
 
     if training_dirs.is_empty() {
-        // Nothing found (or all dirs are reg) 鈥?point at root so dp gives a readable error.
+        // Nothing found (or all dirs are reg) — point at root so dp gives a readable error.
         toml.push('\n');
         toml.push_str("[[directory]]\n");
         toml.push_str(&format!("path = {}\n", toml_string(&dataset_wsl)));
@@ -210,7 +210,7 @@ fn write_diffusion_pipe_main_toml(
     // Determine how model_path maps to a TOML key.
     // - diffusers_path  : qwen_image / ernie_image / z_image
     // - ckpt_path       : hunyuan-video / hunyuan_video_15 (directory with all weights)
-    // - transformer_path: everything else (anima/cosmos_predict2, flux, sd3, sdxl, 鈥?
+    // - transformer_path: everything else (anima/cosmos_predict2, flux, sd3, sdxl, …)
     let uses_diffusers_path = matches!(model_type, "qwen_image" | "ernie_image" | "z_image");
     let uses_ckpt_path      = matches!(model_type, "hunyuan-video" | "hunyuan_video_15");
 
@@ -266,7 +266,7 @@ fn write_diffusion_pipe_main_toml(
         toml.push_str(&format!("timestep_sample_method = {}\n", toml_single_quoted(tsm)));
     }
 
-    // [adapter] 鈥?omit entirely for full fine-tuning
+    // [adapter] — omit entirely for full fine-tuning
     let adapter_type = config.adapter_type.trim();
     if !adapter_type.is_empty() {
         toml.push_str("\n[adapter]\n");
@@ -321,14 +321,14 @@ pub fn build_diffusion_pipe_command(
     let distro = env_settings.wsl_distro.trim();
     if distro.is_empty() {
         return Err(AppError::Validation(
-            "WSL distribution name is not configured. Set it in Design 鈫?Training Env.".to_string(),
+            "WSL distribution name is not configured. Set it in Design → Training Env.".to_string(),
         ));
     }
 
     let dp_wsl_path = env_settings.diffusion_pipe_wsl_path.trim();
     if dp_wsl_path.is_empty() {
         return Err(AppError::Validation(
-            "diffusion-pipe WSL path is not configured. Set it in Design 鈫?Training Env.".to_string(),
+            "diffusion-pipe WSL path is not configured. Set it in Design → Training Env.".to_string(),
         ));
     }
 

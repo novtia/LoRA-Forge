@@ -37,12 +37,12 @@ pub struct SaveCaptionInput {
 #[serde(rename_all = "camelCase")]
 pub struct GroupDatasetImagesInput {
     pub project_id: String,
-    /// Image relative paths (dataset root鈥搑elative, forward-slash separated) to move
+    /// Image relative paths (dataset-root-relative, forward-slash separated) to move
     /// into the new group folder.
     pub relative_paths: Vec<String>,
     /// Display name for the new group; will be sanitized into a folder name.
     pub group_name: String,
-    /// Optional parent folder (dataset root鈥搑elative) under which the new group is
+    /// Optional parent folder (dataset-root-relative) under which the new group is
     /// created. When `None` or empty, the group folder is created directly under
     /// the dataset root.
     pub parent_relative_path: Option<String>,
@@ -112,7 +112,7 @@ fn default_rename_start_index() -> u32 {
 #[serde(rename_all = "camelCase")]
 pub struct ListUntaggedImagePathsInput {
     pub project_id: String,
-    /// Dataset-root鈥搑elative paths of images to check.
+    /// Dataset-root-relative paths of images to check.
     pub relative_paths: Vec<String>,
 }
 

@@ -139,7 +139,7 @@ fn training_subprocess_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::p
 
 /// Reads stdout/stderr from the trainer and dispatches each logical "line".
 ///
-/// We can't use `read_until(b'\n', 鈥?` here because tqdm (used by sd-scripts) emits
+/// We can't use `read_until(b'\n', …)` here because tqdm (used by sd-scripts) emits
 /// in-place progress updates terminated with `\r` and *no* `\n`. With a strict
 /// newline boundary those updates would sit in the BufReader until the next true
 /// newline (often the end of an epoch), making step/loss appear to update in

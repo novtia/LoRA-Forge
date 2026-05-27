@@ -1,0 +1,115 @@
+/* ───── chat list ───── */
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.chat-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  isolation: isolate;
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    padding 0.14s ease,
+    min-height 0.14s ease,
+    gap 0.14s ease,
+    border-radius 0.14s ease;
+  min-height: 28px;
+}
+/* 悬停 / 选中高亮单独画在行框内缩约 5%，避免两行同时高亮时背景连成一片 */
+.chat-item::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  background: var(--accent-acid-dim);
+  border-left: 2px solid var(--accent-acid);
+  border-radius: 0;
+  top: max(1px, 2%);
+  right: max(3px, 2%);
+  bottom: max(1px, 2%);
+  left: max(3px, 2%);
+}
+.chat-item.active::before {
+  opacity: 1;
+  background: rgba(212, 255, 0, 0.08);
+}
+.chat-item:hover::before {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.04);
+  border-left-color: transparent;
+}
+.chat-item.active:hover::before {
+  background: var(--accent-acid-dim);
+  border-left-color: var(--accent-acid);
+}
+.chat-item > * {
+  position: relative;
+  z-index: 1;
+}
+.chat-title {
+  flex: 1;
+  font-size: 13px;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-item.active .chat-title {
+  color: var(--accent-acid);
+  font-weight: 700;
+}
+.chat-meta {
+  font-size: 10.5px;
+  color: var(--ink-mute);
+  flex-shrink: 0;
+}
+.session-config-modal {
+  width: min(640px, 92vw);
+}
+.session-config-form {
+  display: grid;
+  gap: 14px;
+}
+.session-config-form .row {
+  margin-bottom: 0;
+}
+.session-config-form .hint.is-error {
+  color: var(--field-error);
+}
+.session-config-thinking-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.session-config-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.session-config-checkbox input {
+  margin: 0;
+}
+.session-config-thinking-effort-label {
+  margin: 0;
+  font-size: 12px;
+}
+.chat-rename {
+  /* Visual styling provided by .field-input + .field-input--compact below.
+     This rule only handles layout (full-width inside the row). */
+  width: 100%;
+}

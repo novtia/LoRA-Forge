@@ -1,0 +1,652 @@
+/* ───── composer dock (bottom floating) ───── */
+.composer-dock {
+  flex-shrink: 0;
+  padding: 0 24px 22px;
+  display: flex;
+  justify-content: center;
+  background: linear-gradient(180deg, transparent, var(--bg) 30%);
+  position: relative;
+}
+.composer-card {
+  width: 100%;
+  max-width: var(--chat-content-width);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 12px var(--composer-card-padding-x) 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.composer-textarea:focus {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+.composer-card.drag-over {
+  border-color: var(--accent-acid);
+  border-style: dashed;
+  box-shadow: 0 0 0 4px var(--accent-acid-dim);
+}
+.composer-card.drag-over::after {
+  content: '松手即可作为参考图';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent-acid);
+  background: rgba(17, 17, 17, 0.88);
+  backdrop-filter: blur(2px);
+  border-radius: var(--radius-lg);
+}
+.composer-card {
+  position: relative;
+}
+
+.setup-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: -4px -4px 4px;
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  text-align: left;
+  transition: background 0.12s;
+}
+.setup-banner:hover {
+  background: var(--bg-hover);
+}
+.setup-banner-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+}
+.setup-banner-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.setup-banner-text {
+  flex: 1;
+  color: var(--ink-2);
+}
+.setup-banner-cta {
+  background: var(--accent-acid);
+  color: var(--text-dark);
+  border-radius: 0;
+  padding: 3px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px 6px;
+  border-bottom: 1px dashed var(--line);
+}
+.attachment {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--bg-sunk);
+  flex-shrink: 0;
+  animation: pop-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.attachment.pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-style: dashed;
+  color: var(--ink-mute);
+}
+.attachment-placeholder {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.attachment-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--ink-mute);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+.attachment .remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(11, 18, 32, 0.78);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.attachment .remove:hover {
+  background: var(--rose-500);
+}
+.attachment .edit {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(11, 18, 32, 0.78);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.attachment .edit svg {
+  width: 9px;
+  height: 9px;
+}
+.attachment .badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent, rgba(11, 18, 32, 0.65));
+  color: #fff;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  padding: 8px 4px 3px;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-textarea {
+  width: 100%;
+  /* Two text lines at line-height 1.55 plus vertical padding (matches box sizing). */
+  min-height: calc(3.1em + 8px);
+  max-height: 200px;
+  border: none;
+  resize: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  padding: 4px var(--composer-textarea-padding-x);
+  outline: none;
+}
+/* Override forms.css `textarea:disabled` (higher specificity than `.composer-textarea` alone). */
+.composer-textarea:disabled {
+  background: transparent;
+  color: var(--ink-mute);
+  cursor: not-allowed;
+  opacity: 1;
+}
+.composer-textarea::placeholder {
+  color: var(--ink-mute);
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 4px;
+}
+.composer-bar-left,
+.composer-bar-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Match `.composer-pill` typography so auxiliary controls (context ring) align to the same line box. */
+.composer-bar-right {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.composer-ring-model-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.composer-btn {
+  width: 30px;
+  height: 30px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  border-radius: 8px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.12s;
+}
+.composer-btn:hover {
+  border-color: var(--line-strong);
+  background: var(--bg-soft);
+  color: var(--ink);
+}
+.composer-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.composer-params {
+  position: relative;
+}
+
+.composer-mode-wrap {
+  position: relative;
+}
+
+.composer-mode-pill {
+  max-width: 132px;
+}
+
+.composer-mode-pill.is-plan {
+  border-color: rgba(0, 102, 102, 0.45);
+  color: var(--ink-2);
+}
+
+.composer-mode-label {
+  max-width: 96px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-mode-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(240px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  z-index: 62;
+  animation: popover-expand 0.2s var(--ease-pop);
+}
+
+.composer-mode-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--ink-2);
+  transition:
+    background 0.12s,
+    border-color 0.12s;
+}
+
+.composer-mode-option:hover {
+  background: var(--bg-soft);
+}
+
+.composer-mode-option.active {
+  border-color: var(--line-strong);
+  background: var(--bg-soft);
+}
+
+.composer-mode-option-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.composer-mode-option-desc {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-mute);
+}
+
+.composer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.25;
+  font-weight: 500;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.composer-pill:hover,
+.composer-pill.active {
+  border-color: var(--line-strong);
+  background: var(--bg-soft);
+}
+.composer-pill svg {
+  width: 12px;
+  height: 12px;
+  color: var(--ink-soft);
+}
+
+.composer-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  color: var(--ink-mute);
+}
+
+.composer-context-ring {
+  position: relative;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: inherit;
+  line-height: 0;
+  width: 1em;
+  height: 1em;
+}
+
+.composer-context-ring-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.composer-context-ring-tooltip {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  font-size: 11px;
+  line-height: 1.35;
+  text-align: center;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-card);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s ease;
+  z-index: 70;
+}
+
+.composer-context-ring:hover .composer-context-ring-tooltip {
+  opacity: 1;
+}
+
+.composer-context-ring-tooltip-strong {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.composer-context-ring-tooltip-muted {
+  color: var(--ink-mute);
+  font-size: 10.5px;
+}
+
+.composer-context-ring-track {
+  stroke: var(--line-strong);
+  opacity: 0.45;
+}
+
+.composer-context-ring-fill {
+  stroke: var(--accent-acid);
+  transition: stroke 0.15s ease, stroke-dasharray 0.3s ease;
+}
+
+.composer-context-ring-fill.is-warn {
+  stroke: var(--accent-orange);
+}
+
+.composer-context-ring-fill.is-over {
+  stroke: var(--accent-orange);
+}
+
+/* No limit set but token data exists: show a faint indicator arc */
+.composer-context-ring-fill.is-dim {
+  stroke: var(--ink-mute);
+  opacity: 0.5;
+}
+
+.composer-model {
+  position: relative;
+}
+.composer-pill.model {
+  max-width: 280px;
+}
+.composer-pill.model > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.model-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  width: min(320px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+  padding: 8px;
+  z-index: 60;
+  transform-origin: bottom right;
+  animation: popover-expand 0.2s var(--ease-pop);
+}
+.model-popover.model-popover-below {
+  bottom: auto;
+  top: calc(100% + 8px);
+  transform-origin: top right;
+}
+.model-popover-title {
+  flex-shrink: 0;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  color: var(--ink-mute);
+  text-transform: uppercase;
+  padding: 4px 6px 6px;
+}
+.model-popover-empty {
+  flex-shrink: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-mute);
+  padding: 10px 8px 12px;
+}
+.model-popover-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.model-popover-group {
+  padding-bottom: 6px;
+}
+.model-popover-group:last-child {
+  padding-bottom: 0;
+}
+.model-popover-group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  padding: 8px 8px 4px;
+  letter-spacing: 0.02em;
+}
+.model-popover-group:first-child .model-popover-group-title {
+  padding-top: 2px;
+}
+.model-popover-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.model-popover-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  padding: 7px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--ink-2);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.model-popover-item:hover {
+  background: var(--bg-hover);
+}
+.model-popover-item.active {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--bg-soft);
+}
+.model-popover-item-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.model-popover-item svg {
+  flex-shrink: 0;
+  color: var(--ink);
+}
+
+.send-btn {
+  width: 30px;
+  height: 30px;
+  background: var(--accent-acid);
+  color: var(--text-dark);
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: all 0.12s;
+}
+.send-btn:hover:not(:disabled) {
+  background: var(--accent-orange);
+  color: var(--text-dark);
+  transform: translateY(-1px);
+}
+.send-btn.busy {
+  background: var(--accent-acid);
+  color: var(--text-dark);
+  cursor: pointer;
+}
+.send-btn.busy:hover {
+  background: var(--accent-orange);
+  transform: translateY(0);
+}
+.send-btn:disabled {
+  background: var(--bg-surface-alt);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+.send-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.send-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+.send-stop-icon {
+  display: none;
+}
+.send-btn.busy:hover .send-spinner {
+  display: none;
+}
+.send-btn.busy:hover .send-stop-icon {
+  display: block;
+}

@@ -1,0 +1,411 @@
+/* ───── sidebar ───── */
+.side {
+  background: var(--bg-surface);
+  border-right: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.side-top {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* No right padding so the session list scrollbar sits flush with the sidebar edge. */
+  padding: 10px 0 12px 8px;
+}
+
+.side-bottom {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border-dim);
+  padding: 8px;
+}
+
+.side-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 10px;
+}
+.side-brand-glyph {
+  width: 16px;
+  height: 16px;
+  background: var(--accent-acid);
+  color: var(--text-dark);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  clip-path: polygon(10% 0, 100% 0, 90% 100%, 0% 100%);
+  border: none;
+  border-radius: 0;
+  position: relative;
+}
+.side-brand-glyph::after {
+  display: none;
+}
+
+.side-nav {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 8px 6px 0;
+}
+.side-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 0;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  border-left: 2px solid transparent;
+}
+.side-nav-item:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+}
+.side-nav-item:disabled {
+  color: var(--text-muted);
+  opacity: 0.45;
+  cursor: default;
+}
+.side-nav-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--accent-acid);
+  opacity: 0.7;
+}
+.side-nav-item:hover:not(:disabled) svg {
+  opacity: 1;
+}
+
+.side-section {
+  flex: 1;
+  min-height: 0;
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.side-section-title {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.side-section-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0;
+}
+.side-empty {
+  padding: 6px 10px;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+}
+
+/* ─── Shared small icon button ─── */
+.side-icon-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+.side-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--ink);
+}
+.side-icon-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ─── Shared action button group (sort + new project) ─── */
+.side-project-action-btns {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+}
+
+/* ─── Project nav item (shown when no projects) ─── */
+.side-nav-project-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  position: relative;
+}
+.side-nav-project-row:hover {
+  background: var(--bg-hover);
+}
+.side-nav-project-row:hover .side-nav-item--label {
+  color: var(--ink);
+}
+.side-nav-project-row:hover .side-project-action-btns {
+  opacity: 1;
+  pointer-events: auto;
+}
+.side-nav-project-row .side-project-action-btns {
+  padding-right: 6px;
+}
+.side-nav-item--label {
+  flex: 1;
+  cursor: default;
+  color: var(--ink-2);
+  pointer-events: none;
+  min-width: 0;
+}
+.side-nav-item--label:hover {
+  background: transparent;
+  color: var(--ink-2);
+}
+
+/* ─── New project dropdown ─── */
+.side-nav-dropdown-anchor {
+  position: relative;
+}
+.side-nav-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 200;
+  background: var(--bg-float, var(--bg-side));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  min-width: 168px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.side-nav-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.1s;
+}
+.side-nav-dropdown-item:hover {
+  background: var(--bg-hover);
+}
+.side-nav-dropdown-item svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  color: var(--ink-soft);
+}
+.side-nav-dropdown-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.side-nav-dropdown-separator {
+  height: 1px;
+  background: var(--line);
+  margin: 3px 4px;
+}
+
+/* ─── Section headers ─── */
+.side-section-header {
+  display: flex;
+  align-items: center;
+  padding: 4px 10px 4px 10px;
+  margin-bottom: 2px;
+  gap: 4px;
+}
+.side-section-header--sticky {
+  position: sticky;
+  top: 0;
+  background: var(--bg-side);
+  z-index: 1;
+}
+/* Hoverable section header shows action buttons on hover */
+.side-section-header--hoverable:hover .side-project-action-btns {
+  opacity: 1;
+  pointer-events: auto;
+}
+.side-section-title-text {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ─── Project section in scroll ─── */
+.side-project-section {
+  margin-bottom: 6px;
+}
+
+/* ─── Project item ─── */
+.project-item {
+  margin-bottom: 1px;
+}
+.project-item-header {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 6px 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s;
+}
+.project-item-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.project-item-folder-icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--accent-acid);
+}
+.project-item-folder-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.project-item-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-main);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.project-item-trailing {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 52px;
+  height: 24px;
+  margin-left: 4px;
+}
+.project-item-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 0;
+  background: var(--accent-acid-dim);
+  color: var(--accent-acid);
+  border: 1px solid rgba(212, 255, 0, 0.25);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 18px;
+  text-align: center;
+  transition: opacity 0.12s var(--ease-out);
+}
+.project-item-header:hover .project-item-count {
+  opacity: 0;
+  pointer-events: none;
+}
+/* Hover action buttons on the project item row */
+.project-item-actions {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  flex-shrink: 0;
+  transform: translateY(-50%);
+  transition: opacity 0.12s var(--ease-out);
+}
+.project-item-header:hover .project-item-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ─── Sessions under project ─── */
+.project-sessions-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.22s var(--ease-out);
+}
+.project-sessions-wrap.is-expanded {
+  grid-template-rows: 1fr;
+}
+.project-sessions-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.project-sessions {
+  padding-left: 18px;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  transition:
+    opacity 0.18s var(--ease-out),
+    transform 0.22s var(--ease-out);
+}
+.project-sessions-wrap.is-expanded .project-sessions {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.project-sessions-empty {
+  padding: 3px 10px 5px;
+  font-size: 11.5px;
+  color: var(--ink-mute);
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-sessions-wrap,
+  .project-sessions {
+    transition: none;
+  }
+  .project-sessions-wrap.is-expanded .project-sessions {
+    transform: none;
+  }
+}
+.chat-item--nested {
+  padding-left: 8px;
+}

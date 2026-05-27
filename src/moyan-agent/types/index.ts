@@ -1,0 +1,253 @@
+export interface ModelParamSettings {
+  temperature: number | null;
+  top_p: number | null;
+  max_tokens: number | null;
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  /** When true, enables extended reasoning where the SDK supports it. */
+  thinking_enabled: boolean | null;
+  /** e.g. low / medium / high / max — forwarded as OpenAI `reasoning_effort` or Claude `output_config.effort`. */
+  thinking_effort: string | null;
+}
+
+export interface ModelServiceModel {
+  id: string;
+  name: string;
+  group: string;
+  capabilities: string[];
+  /** Max context window (tokens); omit or null when unknown. */
+  context_window?: number | null;
+}
+
+export type ModelProviderSdk =
+  | "openai"
+  | "openai-responses"
+  | "gemini"
+  | "claude"
+  | "grok"
+  | "ark-images";
+
+export interface ModelProvider {
+  id: string;
+  name: string;
+  /** Backend SDK adapter. Defaults to OpenAI chat completions when omitted. */
+  sdk?: ModelProviderSdk | (string & {});
+  avatar?: string;
+  endpoint: string;
+  api_key: string;
+  /** When false, hidden from chat model picker and not used for requests. Default true. */
+  enabled?: boolean;
+  models: ModelServiceModel[];
+}
+
+/** SDK adapter metadata + default models (from app catalog / DB). */
+export interface ProviderSdkConfig {
+  id: string;
+  label: string;
+  description: string;
+  defaultName: string;
+  defaultEndpoint: string;
+  endpointPlaceholder: string;
+  endpointHint: string;
+  apiKeyPlaceholder: string;
+  apiKeyHint: string;
+  modelIdPlaceholder: string;
+  modelIdHint: string;
+  models: ModelServiceModel[];
+}
+
+export interface LlmModelCatalog {
+  providerSdkOptions: ProviderSdkConfig[];
+  builtinProviderPresets: ModelProvider[];
+}
+
+export interface Settings {
+  api_key: string;
+  endpoint: string;
+  model: string;
+  active_provider_id: string;
+  model_services: ModelProvider[];
+  default_aspect_ratio: string;
+  default_image_size: string;
+  system_prompt: string;
+  temperature: number | null;
+  top_p: number | null;
+  max_tokens: number | null;
+  frequency_penalty: number | null;
+  presence_penalty: number | null;
+  history_turns: number;
+}
+
+export interface SettingsPatch {
+  api_key?: string;
+  endpoint?: string;
+  model?: string;
+  active_provider_id?: string;
+  model_services?: ModelProvider[];
+  default_aspect_ratio?: string;
+  default_image_size?: string;
+  system_prompt?: string;
+  temperature?: number | null;
+  top_p?: number | null;
+  max_tokens?: number | null;
+  frequency_penalty?: number | null;
+  presence_penalty?: number | null;
+  history_turns?: number;
+}
+
+export interface Session {
+  id: string;
+  title: string;
+  model: string | null;
+  system_prompt: string;
+  history_turns: number;
+  llm_params: ModelParamSettings;
+  /** Context window limit (tokens); null defers to model/catalog. */
+  context_window: number | null;
+  /** Cumulative usage (tokens) tracked for this session. */
+  context_window_used: number;
+  /** Main chat agent: `general-purpose` (Agent) or `Plan` (read-only planning). */
+  agent_type: string;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SessionSummary {
+  id: string;
+  title: string;
+  model: string | null;
+  system_prompt: string;
+  history_turns: number;
+  llm_params: ModelParamSettings;
+  context_window: number | null;
+  context_window_used: number;
+  agent_type: string;
+  updated_at: number;
+  message_count: number;
+  project_id: string | null;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  path: string | null;
+  sort_order: number;
+  /** Shared system prompt applied to all sessions in this project. */
+  system_prompt: string;
+  /** Number of history turns for project sessions. */
+  history_turns: number;
+  /** Shared LLM sampling params for project sessions. */
+  llm_params: ModelParamSettings;
+  /** Optional context window override (tokens) for project sessions. */
+  context_window: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface SessionSearchResult extends SessionSummary {
+  match_message_id: string | null;
+  match_role: "user" | "assistant" | "error" | string | null;
+  match_text: string | null;
+  match_created_at: number | null;
+  match_count: number;
+  title_match: boolean;
+  project_id: string | null;
+}
+
+export interface ImageRefAbs {
+  id: string;
+  role: "input" | "output" | "edited" | string;
+  rel_path: string;
+  thumb_rel_path: string | null;
+  abs_path: string;
+  thumb_abs_path: string | null;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+  ord: number;
+}
+
+/**
+ * One inline content block of an assistant message.
+ *
+ * Assistant messages are an *ordered list* of blocks so that thinking,
+ * text, and tool calls render in the exact order they streamed in. The
+ * agent loop can produce multiple thinking/text/tool blocks per
+ * message (one set per inner turn) and the renderer must preserve that
+ * interleaving — see the design note in
+ * `docs/工具调用_ui_渲染.plan.md`.
+ */
+export type AssistantBlock =
+  | { type: "thinking"; content: string }
+  | { type: "text"; content: string }
+  | {
+      type: "tool_use";
+      id: string;
+      tool: string;
+      input: unknown;
+      status: "pending" | "success" | "error";
+      output?: unknown;
+      is_error?: boolean;
+    };
+
+export interface MessageAbs {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant" | "error" | string;
+  text: string | null;
+  params: {
+    aspect_ratio?: string;
+    image_size?: string;
+    thinking_content?: string | null;
+    /**
+     * Ordered, streamed inline blocks for assistant messages. Newer
+     * messages always populate this; older messages (created before the
+     * blocks model existed) only carry `text` / `thinking_content` and
+     * the renderer falls back to the legacy single-segment view.
+     */
+    blocks?: AssistantBlock[];
+    usage?: {
+      prompt_tokens?: number | null;
+      completion_tokens?: number | null;
+      total_tokens?: number | null;
+    };
+  } | null;
+  created_at: number;
+  images: ImageRefAbs[];
+}
+
+export interface SessionWithMessagesAbs {
+  session: Session;
+  messages: MessageAbs[];
+}
+
+export interface AttachmentDraft {
+  image_id: string;
+  rel_path: string;
+  thumb_rel_path: string | null;
+  abs_path: string;
+  thumb_abs_path: string | null;
+  mime: string;
+  width: number | null;
+  height: number | null;
+  bytes: number | null;
+}
+
+export type EditOp =
+  | { type: "crop"; x: number; y: number; width: number; height: number }
+  | { type: "resize"; width: number; height: number }
+  | { type: "rotate"; degrees: number }
+  | { type: "flip"; horizontal: boolean }
+  | { type: "apply_mask"; mask_png_base64: string };
+
+export interface GenerateResult {
+  user_message: MessageAbs;
+  assistant_message: MessageAbs;
+}
+
+export interface ImportResult {
+  projects_imported: number;
+  sessions_imported: number;
+  messages_imported: number;
+}

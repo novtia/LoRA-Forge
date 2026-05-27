@@ -1,0 +1,79 @@
+/* ───── LORA Forge design tokens (semantic aliases) ─────
+   Base palette lives in src/styles/global.css and is overridden
+   by DesignSettingsProvider preset variables. */
+
+:root {
+  color-scheme: dark;
+
+  /* Moyan-agent semantic aliases → LORA Forge tokens */
+  --bg: var(--bg-base);
+  --bg-soft: var(--bg-surface);
+  --bg-sunk: rgba(0, 0, 0, 0.28);
+  --bg-side: var(--bg-surface);
+  --bg-hover: var(--bg-surface-alt);
+  --bg-float: var(--bg-surface);
+
+  --line: var(--border-dim);
+  --line-strong: var(--border-glow);
+
+  --ink: var(--text-main);
+  --ink-2: var(--text-main);
+  --ink-soft: var(--text-muted);
+  --ink-mute: var(--text-muted);
+
+  --accent: var(--accent-acid);
+  --accent-soft: var(--accent-orange);
+
+  /* Status / semantic colors — acid & orange, no blue/purple */
+  --blue-50: var(--accent-acid-dim);
+  --blue-100: var(--accent-acid-dim);
+  --blue-500: var(--accent-acid);
+  --blue-600: var(--accent-acid);
+  --blue-700: var(--accent-acid);
+
+  --green-50: var(--accent-acid-dim);
+  --green-500: var(--accent-acid);
+  --green-600: var(--accent-acid);
+
+  --rose-50: var(--accent-orange-dim);
+  --rose-500: var(--accent-orange);
+
+  /* LORA sharp geometry */
+  --radius: 4px;
+  --radius-sm: 2px;
+  --radius-lg: 6px;
+
+  --shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03), 0 2px 8px rgba(0, 0, 0, 0.32);
+  --shadow-2: 0 8px 24px -8px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-pop: 0 18px 44px -12px rgba(0, 0, 0, 0.62);
+  --shadow-card: 0 12px 32px -12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-pop: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --titlebar-height: 32px;
+  --chat-content-width: 760px;
+  --chat-gallery-width: 320px;
+  --composer-card-padding-x: 14px;
+  --composer-textarea-padding-x: 4px;
+  --chat-content-padding-x: calc(1px + var(--composer-card-padding-x) + var(--composer-textarea-padding-x));
+
+  /* Unified form field tokens */
+  --field-bg: rgba(0, 0, 0, 0.3);
+  --field-bg-soft: rgba(0, 0, 0, 0.18);
+  --field-border: var(--border-dim);
+  --field-border-hover: var(--border-glow);
+  --field-border-focus: var(--accent-acid);
+  --field-focus-ring: 0 0 15px rgba(212, 255, 0, 0.1);
+  --field-radius: 0;
+  --field-radius-sm: 0;
+  --field-padding-y: 8px;
+  --field-padding-x: 11px;
+  --field-padding-y-sm: 4px;
+  --field-padding-x-sm: 8px;
+  --field-padding-y-lg: 10px;
+  --field-padding-x-lg: 12px;
+  --field-font-size: 13px;
+  --field-line-height: 1.5;
+  --field-transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+  --field-error: var(--accent-orange);
+}

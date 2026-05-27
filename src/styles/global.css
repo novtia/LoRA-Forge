@@ -3081,3 +3081,51 @@ div.lf-dataset-caption-editor[contenteditable="false"] {
   opacity: 0.88;
   cursor: not-allowed;
 }
+
+/* ── MoyanAgent launcher FAB ─────────────────────────────────────────────── */
+
+.agent-launcher-fab {
+  position: fixed;
+  right: 1.25rem;
+  bottom: 1.25rem;
+  z-index: 1200;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.72rem 1rem 0.72rem 0.85rem;
+  border: 1px solid color-mix(in srgb, var(--accent-acid) 55%, var(--border-dim));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+  color: var(--text-main);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  transition: var(--transition);
+}
+
+.agent-launcher-fab:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: var(--accent-acid);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.42),
+    0 0 18px var(--accent-acid-dim);
+}
+
+.agent-launcher-fab:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.agent-launcher-fab:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.agent-launcher-fab__label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-acid);
+}

@@ -4,8 +4,12 @@
  *   所有 Tauri Builder 装配都在 app/mod.rs。
  */
 
+mod agent_app;
+mod agent_error;
+mod ai;
 mod app;
 mod commands;
+mod data;
 mod db;
 mod domain;
 mod error;
@@ -13,6 +17,7 @@ mod hardware;
 mod infra;
 mod llm;
 mod llm_provider_db;
+mod media;
 mod models;
 mod services;
 mod state;

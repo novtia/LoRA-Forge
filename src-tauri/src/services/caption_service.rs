@@ -4,7 +4,10 @@
  *   不依赖 Tauri，可被 commands 层和批量任务共享调用。
  */
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use crate::{
     db,
@@ -30,8 +33,8 @@ pub async fn caption_image(
     current_caption: Option<&str>,
     previous_assistant_caption: Option<&str>,
     previous_image_relative_path: Option<&str>,
+    cancel: Arc<AtomicBool>,
 ) -> AppResult<String> {
-    let cancel = state.llm_caption_cancel_flag();
     let (project, settings) = state.with_db(|connection| {
         Ok((
             db::get_project(connection, project_id)?,

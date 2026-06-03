@@ -42,6 +42,28 @@ export function createProject(name: string, rootPath: string): Promise<ProjectRe
   });
 }
 
+export function updateProject(
+  projectId: string,
+  name: string,
+  rootPath: string,
+): Promise<ProjectRecord> {
+  return invoke("update_lora_project", {
+    input: {
+      projectId,
+      name,
+      rootPath,
+    },
+  });
+}
+
+export function deleteProject(projectId: string): Promise<void> {
+  return invoke("delete_lora_project", {
+    input: {
+      projectId,
+    },
+  });
+}
+
 export function loadTrainingConfig(projectId: string): Promise<TrainingConfig> {
   return invoke("load_training_config", { projectId });
 }
@@ -317,25 +339,41 @@ export function autoTagImage(
   tagMode?: CaptionTagMode | null,
   currentCaption?: string | null,
 ): Promise<string> {
-  const trimmed = userMessage?.trim();
+  const trimmed = userMessage?.trim() ?? "";
   const prev = previousAssistantCaption?.trim();
   const prevImg = previousImageRelativePath?.trim();
-  const caption = currentCaption?.trim();
+  const caption = currentCaption?.trim() ?? "";
+  const isConversation = tagMode === "conversationModify";
   return invoke("auto_tag_image", {
     projectId,
     relativePath,
-    userMessage: trimmed && trimmed.length > 0 ? trimmed : null,
+    userMessage: isConversation
+      ? trimmed
+      : trimmed.length > 0
+        ? trimmed
+        : null,
     previousAssistantCaption:
       prev && prev.length > 0 ? prev : null,
     previousImageRelativePath:
       prevImg && prevImg.length > 0 ? prevImg : null,
     tagMode: tagMode ?? "direct",
-    currentCaption: caption && caption.length > 0 ? caption : null,
+    currentCaption: isConversation
+      ? caption
+      : caption.length > 0
+        ? caption
+        : null,
   });
 }
 
-export function cancelLlmCaption(): Promise<void> {
-  return invoke("cancel_llm_caption");
+/**
+ * 取消 LLM 打标。传入 `projectId` + `relativePath` 时只取消该图片的打标进程；
+ * 不传参数则取消当前全部在途打标（用于批量打标的整体停止）。
+ */
+export function cancelLlmCaption(projectId?: string, relativePath?: string): Promise<void> {
+  return invoke("cancel_llm_caption", {
+    projectId: projectId ?? null,
+    relativePath: relativePath ?? null,
+  });
 }
 
 export function loadDiffusionPipeConfig(projectId: string): Promise<DiffusionPipeConfig> {

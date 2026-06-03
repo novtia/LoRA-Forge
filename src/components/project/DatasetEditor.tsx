@@ -12,6 +12,7 @@ import {
   baiduTranslate,
   batchConvertDatasetExtensions,
   batchRenameDatasetImages,
+  cancelLlmCaption,
   clearApiLogs,
   deleteDatasetImage,
   getDatasetAsset,
@@ -74,6 +75,11 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const [selectedImageIndex, setSelectedImageIndex] = useState(-1);
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /**
+   * 正在进行单图打标的图片相对路径集合。每张图各自独立打标、互不影响，
+   * 因此用集合而非单一的 `busy` 锁，允许选中一张图打标后立即切到另一张继续打标。
+   */
+  const [taggingPaths, setTaggingPaths] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [previewDockOpen, setPreviewDockOpen] = useState(false);
   const [batchFlyoutOpen, setBatchFlyoutOpen] = useState(false);
@@ -1000,6 +1006,19 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
   const currentImage = selectedImageIndex >= 0 ? imageEntries[selectedImageIndex] ?? null : null;
 
+  /** 当前展示的图片路径，供异步打标回调判断「结果回来时是否仍停留在这张图」。 */
+  const currentImagePathRef = useRef<string | null>(null);
+  currentImagePathRef.current = currentImage?.relativePath ?? null;
+
+  /** 批量打标当前处理图片，供「停止批量」按钮精确取消那一张。 */
+  const batchProgressRef = useRef<BatchProgress | null>(null);
+  batchProgressRef.current = batchProgress;
+
+  /** 当前单图是否正在打标（仅作用于这一张，不会因为别的图在打标而禁用）。 */
+  const currentImageTagging = currentImage
+    ? taggingPaths.has(currentImage.relativePath)
+    : false;
+
   useEffect(() => {
     setZhPartitionHighlight(null);
   }, [currentImage?.relativePath]);
@@ -1409,30 +1428,39 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     }
   };
 
-  const applyGeneratedCaption = async () => {
-    if (!asset) return;
+  /**
+   * 单图打标：每次调用都为「触发那一刻选中的图片」开启一个独立的异步进程，
+   * 不再占用全局 `busy` 锁。因此可以选中一张图开始打标后立刻切换到另一张继续打标，
+   * 多张图的打标并发执行、互不影响。结果回来时只有「仍停留在该图」才会刷新编辑区。
+   */
+  const applyGeneratedCaption = useCallback(async () => {
+    const target = currentImage;
+    if (!target) return;
+    const targetPath = target.relativePath;
+    // 同一张图已在打标则忽略重复触发。
+    if (taggingPaths.has(targetPath)) return;
+
     const isConversation = llmTagMode === "conversationModify";
     const hint = (isConversation ? llmConversationHint : llmDirectTagHint).trim();
-    if (isConversation && hint.length === 0) {
-      setError(t("dataset.modifyCaptionNeedHint"));
-      return;
-    }
-    if (isConversation && caption.trim().length === 0) {
-      setError(t("dataset.modifyCaptionNeedCaption"));
-      return;
-    }
-    setBusy("llm");
+    // 对话修改模式需要在触发当下捕获编辑区文本（之后可能切到别的图）。
+    const conversationCaption = isConversation ? captionRef.current : undefined;
+    const priorImage = previousImage;
+
+    setTaggingPaths((prev) => {
+      const next = new Set(prev);
+      next.add(targetPath);
+      return next;
+    });
     setError(null);
 
     let previousAssistantCaption: string | undefined;
     let previousImageRelativePath: string | undefined;
-    if (!isConversation && previousImage) {
+    if (!isConversation && priorImage) {
       try {
-        const prior = await readCaption(projectId, previousImage.relativePath);
-        const t = prior.trim();
-        if (t.length > 0) {
-          previousAssistantCaption = t;
-          previousImageRelativePath = previousImage.relativePath;
+        const prior = (await readCaption(projectId, priorImage.relativePath)).trim();
+        if (prior.length > 0) {
+          previousAssistantCaption = prior;
+          previousImageRelativePath = priorImage.relativePath;
         }
       } catch {
         previousAssistantCaption = undefined;
@@ -1443,17 +1471,21 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     try {
       const nextCaption = await autoTagImage(
         projectId,
-        asset.relativePath,
-        hint.length > 0 ? hint : undefined,
+        targetPath,
+        isConversation ? hint : hint.length > 0 ? hint : undefined,
         previousAssistantCaption,
         previousImageRelativePath,
         llmTagMode,
-        isConversation ? caption : undefined,
+        isConversation ? conversationCaption : undefined,
       );
-      setCaption(nextCaption);
       try {
-        await writeCaption(projectId, asset.relativePath, nextCaption);
-        await loadAsset(asset.relativePath);
+        await writeCaption(projectId, targetPath, nextCaption);
+        // 仅当结果回来时用户仍停留在这张图，才同步到编辑区，避免覆盖别的图。
+        if (currentImagePathRef.current === targetPath) {
+          setCaption(nextCaption);
+          captionRef.current = nextCaption;
+          await loadAsset(targetPath);
+        }
       } catch (saveError) {
         setError(getErrorMessage(saveError, t("errors.saveCaption")));
       }
@@ -1462,9 +1494,36 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         setError(getErrorMessage(captionError, t("errors.generateCaption")));
       }
     } finally {
-      setBusy(null);
+      setTaggingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(targetPath);
+        return next;
+      });
     }
-  };
+  }, [
+    currentImage,
+    llmConversationHint,
+    llmDirectTagHint,
+    llmTagMode,
+    loadAsset,
+    previousImage,
+    projectId,
+    t,
+    taggingPaths,
+  ]);
+
+  /** 停止「当前这张图」的打标进程，不影响其它正在打标的图。 */
+  const handleStopAutoTag = useCallback(() => {
+    const path = currentImagePathRef.current;
+    if (path) void cancelLlmCaption(projectId, path);
+  }, [projectId]);
+
+  /** 停止批量打标：精确取消批量当前正在处理的那一张。 */
+  const handleStopBatchTagging = useCallback(() => {
+    const path = batchProgressRef.current?.relativePath;
+    if (path) void cancelLlmCaption(projectId, path);
+    else void cancelLlmCaption();
+  }, [projectId]);
 
   const runBatchTagging = useCallback(async () => {
     if (batchTaggingTargetEntries.length === 0 || busy !== null) {
@@ -1476,10 +1535,6 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
     const isConversation = llmTagMode === "conversationModify";
     const hint = (isConversation ? llmConversationHint : llmDirectTagHint).trim();
-    if (isConversation && hint.length === 0) {
-      setError(t("dataset.modifyCaptionNeedHint"));
-      return;
-    }
 
     let targets: DatasetEntry[];
     if (taggingMode === "all") {
@@ -1503,23 +1558,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       targets = targets.filter((e) => untaggedPathSet.has(e.relativePath));
     }
 
-    if (isConversation && targets.length > 0) {
-      const withCaption: DatasetEntry[] = [];
-      for (const entry of targets) {
-        try {
-          const raw = await readCaption(projectId, entry.relativePath);
-          if (raw.trim().length > 0) {
-            withCaption.push(entry);
-          }
-        } catch {
-          // skip images whose caption cannot be read
-        }
-      }
-      targets = withCaption;
-    }
-
     if (targets.length === 0) {
-      setError(isConversation ? t("dataset.batchNoCaptionsToModify") : t("dataset.batchNoUntagged"));
+      setError(t("dataset.batchNoUntagged"));
       return;
     }
 
@@ -1552,9 +1592,11 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         try {
           let nextCaption: string;
           if (isConversation) {
-            const currentCaption = (await readCaption(projectId, entry.relativePath)).trim();
-            if (currentCaption.length === 0) {
-              continue;
+            let currentCaption = "";
+            try {
+              currentCaption = (await readCaption(projectId, entry.relativePath)).trim();
+            } catch {
+              currentCaption = "";
             }
             nextCaption = await autoTagImage(
               projectId,
@@ -1801,6 +1843,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         setLlmConversationHint={setLlmConversationHint}
         apiLogLines={apiLogLines}
         runBatchTagging={runBatchTagging}
+        onStopBatchTagging={handleStopBatchTagging}
         refreshApiLogs={refreshApiLogs}
         clearApiLogs={handleClearApiLogs}
         previousImage={previousImage}
@@ -1831,6 +1874,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       <DatasetEditorCaptionsCard
         asset={asset}
         busy={busy}
+        currentImageTagging={currentImageTagging}
+        onStopAutoTag={handleStopAutoTag}
         imageEntriesLength={imageEntries.length}
         onAutoTag={applyGeneratedCaption}
         llmTagMode={llmTagMode}

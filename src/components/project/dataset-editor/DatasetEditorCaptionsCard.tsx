@@ -13,7 +13,6 @@ import {
   Tags,
   Trash,
 } from "lucide-react";
-import { cancelLlmCaption } from "../../../lib/desktopApi";
 import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
 import { useI18n } from "../../../lib/i18n";
 import type { DatasetAsset, CaptionTagMode } from "../../../lib/types";
@@ -27,6 +26,10 @@ import { DatasetEditorLlmSelection } from "./DatasetEditorLlmSelection";
 type Props = {
   asset: DatasetAsset | null;
   busy: string | null;
+  /** 当前展示的这张图是否正在打标（独立于其它图片的打标进程）。 */
+  currentImageTagging: boolean;
+  /** 停止当前这张图的打标进程。 */
+  onStopAutoTag: () => void;
   imageEntriesLength: number;
   onAutoTag: () => Promise<void>;
   llmTagMode: CaptionTagMode;
@@ -69,6 +72,8 @@ type Props = {
 export function DatasetEditorCaptionsCard({
   asset,
   busy,
+  currentImageTagging,
+  onStopAutoTag,
   imageEntriesLength,
   onAutoTag,
   llmTagMode,
@@ -153,11 +158,11 @@ export function DatasetEditorCaptionsCard({
           <button
             className="btn btn-primary"
             style={{ flex: 1, justifyContent: "center", padding: "0.75rem" }}
-            disabled={!asset || (busy !== null && busy !== "llm")}
+            disabled={!asset || currentImageTagging}
             onClick={() => void onAutoTag()}
           >
             <Bot size={18} />{" "}
-            {busy === "llm"
+            {currentImageTagging
               ? t("dataset.running")
               : isConversation
                 ? t("dataset.modifyCaption")
@@ -169,10 +174,8 @@ export function DatasetEditorCaptionsCard({
             style={{ justifyContent: "center", padding: "0 0.85rem", flexShrink: 0, minWidth: "3rem" }}
             title={t("dataset.stopLlmCaption")}
             aria-label={t("dataset.stopLlmCaption")}
-            disabled={busy !== "llm"}
-            onClick={() => {
-              void cancelLlmCaption();
-            }}
+            disabled={!currentImageTagging}
+            onClick={onStopAutoTag}
           >
             <StopCircle size={20} aria-hidden />
           </button>
@@ -524,7 +527,7 @@ export function DatasetEditorCaptionsCard({
           <button
             className="btn btn-primary"
             style={{ flex: 1, justifyContent: "center", padding: "0.5rem" }}
-            disabled={!asset || busy !== null}
+            disabled={!asset || busy !== null || currentImageTagging}
             onClick={() => void onSave()}
           >
             <Save size={16} /> {busy === "save" ? t("dataset.saving") : t("dataset.save")}
@@ -532,7 +535,7 @@ export function DatasetEditorCaptionsCard({
           <button
             className="btn btn-danger"
             style={{ justifyContent: "center", padding: "0.5rem", marginLeft: 0 }}
-            disabled={!asset || busy !== null}
+            disabled={!asset || busy !== null || currentImageTagging}
             aria-label={t("dataset.delete")}
             title={t("dataset.delete")}
             onClick={() => void onDelete()}

@@ -65,8 +65,19 @@ pub fn delete_dataset_image(
 }
 
 #[tauri::command]
-pub fn cancel_llm_caption(state: State<'_, AppState>) -> Result<(), String> {
-    state.request_llm_caption_cancel();
+pub fn cancel_llm_caption(
+    project_id: Option<String>,
+    relative_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // 同时传了项目与图片路径时只取消那一张；否则取消当前全部在途打标。
+    match (project_id, relative_path) {
+        (Some(pid), Some(rel)) => {
+            let key = AppState::llm_caption_cancel_key(&pid, &rel);
+            state.request_llm_caption_cancel(Some(&key));
+        }
+        _ => state.request_llm_caption_cancel(None),
+    }
     Ok(())
 }
 
@@ -157,19 +168,23 @@ pub async fn auto_tag_image(
     previous_image_relative_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    state.reset_llm_caption_cancel();
-    respond(
-        caption_service::caption_image(
-            state.inner().clone(),
-            &project_id,
-            &relative_path,
-            CaptionTagMode::parse(tag_mode.as_deref()),
-            user_message.as_deref(),
-            current_caption.as_deref(),
-            previous_assistant_caption.as_deref(),
-            previous_image_relative_path.as_deref(),
-        )
-        .await,
+    let app_state = state.inner().clone();
+    // 每张图片注册独立的取消标志，互不影响；结束后清理。
+    let key = AppState::llm_caption_cancel_key(&project_id, &relative_path);
+    let cancel = app_state.begin_llm_caption(&key);
+    let result = caption_service::caption_image(
+        app_state.clone(),
+        &project_id,
+        &relative_path,
+        CaptionTagMode::parse(tag_mode.as_deref()),
+        user_message.as_deref(),
+        current_caption.as_deref(),
+        previous_assistant_caption.as_deref(),
+        previous_image_relative_path.as_deref(),
+        cancel,
     )
+    .await;
+    app_state.finish_llm_caption(&key);
+    respond(result)
 }
 

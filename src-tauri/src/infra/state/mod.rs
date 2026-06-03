@@ -32,7 +32,9 @@ struct AppStateInner {
     db: Mutex<Connection>,
     jobs: Mutex<HashMap<String, RuntimeJob>>,
     hardware_info: Mutex<HardwareInfo>,
-    llm_caption_cancel: Arc<AtomicBool>,
+    /// 每张图片各自独立的打标取消标志，按 `project_id\u{1f}relative_path` 作为 key。
+    /// 这样不同图片的打标互不影响，单独取消只会终止对应那一张。
+    llm_caption_cancels: Mutex<HashMap<String, Arc<AtomicBool>>>,
     api_logs: ApiLogStore,
 }
 
@@ -67,7 +69,7 @@ impl AppState {
                 db: Mutex::new(connection),
                 jobs: Mutex::new(HashMap::new()),
                 hardware_info: Mutex::new(hardware_info),
-                llm_caption_cancel: Arc::new(AtomicBool::new(false)),
+                llm_caption_cancels: Mutex::new(HashMap::new()),
                 api_logs: ApiLogStore::new(),
             }),
         })
@@ -85,20 +87,51 @@ impl AppState {
         self.inner.api_logs.clear();
     }
 
-    pub fn llm_caption_cancel_flag(&self) -> Arc<AtomicBool> {
-        self.inner.llm_caption_cancel.clone()
+    /// 拼接单张图片打标取消标志的 key。
+    pub fn llm_caption_cancel_key(project_id: &str, relative_path: &str) -> String {
+        format!("{project_id}\u{1f}{relative_path}")
     }
 
-    pub fn reset_llm_caption_cancel(&self) {
+    /// 为某张图片开始一次打标：注册一个全新的（未取消）标志并返回。
+    /// 同一张图重复触发会覆盖旧标志，但旧任务仍持有自己的 Arc，不受影响。
+    pub fn begin_llm_caption(&self, key: &str) -> Arc<AtomicBool> {
+        let flag = Arc::new(AtomicBool::new(false));
         self.inner
-            .llm_caption_cancel
-            .store(false, Ordering::SeqCst);
+            .llm_caption_cancels
+            .lock()
+            .expect("llm_caption_cancels poisoned")
+            .insert(key.to_string(), flag.clone());
+        flag
     }
 
-    pub fn request_llm_caption_cancel(&self) {
+    /// 打标结束后清理对应 key 的标志。
+    pub fn finish_llm_caption(&self, key: &str) {
         self.inner
-            .llm_caption_cancel
-            .store(true, Ordering::SeqCst);
+            .llm_caption_cancels
+            .lock()
+            .expect("llm_caption_cancels poisoned")
+            .remove(key);
+    }
+
+    /// 请求取消打标：`Some(key)` 仅取消指定图片，`None` 取消当前全部在途打标。
+    pub fn request_llm_caption_cancel(&self, key: Option<&str>) {
+        let guard = self
+            .inner
+            .llm_caption_cancels
+            .lock()
+            .expect("llm_caption_cancels poisoned");
+        match key {
+            Some(k) => {
+                if let Some(flag) = guard.get(k) {
+                    flag.store(true, Ordering::SeqCst);
+                }
+            }
+            None => {
+                for flag in guard.values() {
+                    flag.store(true, Ordering::SeqCst);
+                }
+            }
+        }
     }
 
     pub fn paths(&self) -> AppPaths {

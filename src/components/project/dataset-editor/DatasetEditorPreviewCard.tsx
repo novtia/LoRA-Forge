@@ -10,7 +10,6 @@ import {
   StopCircle,
   X,
 } from "lucide-react";
-import { cancelLlmCaption } from "../../../lib/desktopApi";
 import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
 import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry } from "../../../lib/types";
 import { useI18n } from "../../../lib/i18n";
@@ -61,6 +60,8 @@ type Props = {
   setLlmConversationHint: (value: string) => void;
   apiLogLines: ApiLogEntry[];
   runBatchTagging: () => Promise<void>;
+  /** 停止批量打标（取消当前正在处理的那一张）。 */
+  onStopBatchTagging: () => void;
   refreshApiLogs: () => Promise<void>;
   clearApiLogs: () => Promise<void>;
   previousImage: DatasetEntry | null;
@@ -119,6 +120,7 @@ export function DatasetEditorPreviewCard({
   setLlmConversationHint,
   apiLogLines,
   runBatchTagging,
+  onStopBatchTagging,
   refreshApiLogs,
   clearApiLogs,
   previousImage,
@@ -604,9 +606,7 @@ export function DatasetEditorPreviewCard({
                     title={t("dataset.stopLlmCaption")}
                     aria-label={t("dataset.stopLlmCaption")}
                     disabled={busy !== "batch-llm"}
-                    onClick={() => {
-                      void cancelLlmCaption();
-                    }}
+                    onClick={onStopBatchTagging}
                   >
                     <StopCircle size={20} aria-hidden />
                   </button>

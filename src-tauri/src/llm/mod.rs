@@ -41,9 +41,10 @@ use crate::{
 };
 
 use http::{
-    blocking_finish_reason, extract_error_message, extract_user_visible_caption, mime_type_for_image,
-    normalize_chat_completions_url, openrouter_extra_headers, print_llm_http_response_body_to_stderr,
-    response_excerpt, sanitize_caption, shared_http_client,
+    blocking_finish_reason, describe_network_error, extract_error_message,
+    extract_user_visible_caption, mime_type_for_image, normalize_chat_completions_url,
+    openrouter_extra_headers, print_llm_http_response_body_to_stderr,
+    print_llm_network_error_to_stderr, response_excerpt, sanitize_caption, shared_llm_chat_client,
 };
 use prompt::{
     build_user_message_content, compose_auto_tag_user_prompt, compose_modify_user_prompt,
@@ -119,22 +120,8 @@ pub async fn caption_for_dataset_image(
             .await
         }
         CaptionTagMode::ConversationModify => {
-            let instruction = user_message
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    AppError::Validation(
-                        "Conversation modify mode requires a user instruction".to_string(),
-                    )
-                })?;
-            let caption = current_caption
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| {
-                    AppError::Validation(
-                        "Conversation modify mode requires an existing caption to edit".to_string(),
-                    )
-                })?;
+            let instruction = user_message.map(str::trim).unwrap_or("");
+            let caption = current_caption.map(str::trim).unwrap_or("");
             modify_dataset_caption(
                 settings,
                 image_path,
@@ -287,6 +274,7 @@ pub async fn modify_dataset_caption(
         .to_string();
     let mime = mime_type_for_image(image_path);
     let image_bytes = fs::read(image_path)?;
+    let image_byte_count = image_bytes.len();
     let image_data_url = format!(
         "data:{};base64,{}",
         mime,
@@ -325,6 +313,8 @@ pub async fn modify_dataset_caption(
             modify_dataset_caption_once(
                 settings,
                 Some(image_data_url.as_str()),
+                image_byte_count,
+                mime,
                 current_caption,
                 user_instruction,
                 with_image,
@@ -354,6 +344,8 @@ pub async fn modify_dataset_caption(
 async fn modify_dataset_caption_once(
     settings: &LlmSettings,
     image_data_url: Option<&str>,
+    image_byte_count: usize,
+    mime: &'static str,
     initial_caption: &str,
     user_instruction: &str,
     include_image: bool,
@@ -415,6 +407,17 @@ async fn modify_dataset_caption_once(
                         model_id,
                         include_image,
                         endpoint.trim()
+                    ),
+                );
+                st.push_api_log(
+                    "llm",
+                    "info",
+                    format_llm_request_for_api_log(
+                        &request_body,
+                        kind,
+                        image_byte_count,
+                        mime,
+                        is_thinking,
                     ),
                 );
             }
@@ -513,7 +516,7 @@ async fn post_chat_completions(
 ) -> AppResult<Value> {
     let extra_headers = openrouter_extra_headers(kind);
     let work = async move {
-        let client = shared_http_client();
+        let client = shared_llm_chat_client();
         let mut request = client.post(endpoint).json(request_body);
         if !api_key.is_empty() {
             request = request.bearer_auth(api_key);
@@ -522,15 +525,33 @@ async fn post_chat_completions(
             request = request.header(*name, *value);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|err| AppError::Network(err.to_string()))?;
+        let response = match request.send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                let msg = describe_network_error(&err.to_string());
+                print_llm_network_error_to_stderr("send", &msg);
+                if let Some(st) = log_sink {
+                    st.push_api_log("llm", "error", format!("network (send): {msg}"));
+                }
+                return Err(AppError::Network(msg));
+            }
+        };
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|err| AppError::Network(err.to_string()))?;
+        let body = match response.text().await {
+            Ok(text) => text,
+            Err(err) => {
+                let msg = describe_network_error(&err.to_string());
+                print_llm_network_error_to_stderr("read body", &msg);
+                if let Some(st) = log_sink {
+                    st.push_api_log(
+                        "llm",
+                        "error",
+                        format!("network (read body) HTTP {} · {msg}", status.as_u16()),
+                    );
+                }
+                return Err(AppError::Network(msg));
+            }
+        };
 
         print_llm_http_response_body_to_stderr(status.as_u16(), &body);
 
@@ -560,12 +581,27 @@ async fn post_chat_completions(
                     .and_then(Value::as_str)
                     .map(str::to_string)
                 {
+                    if let Some(st) = log_sink {
+                        st.push_api_log(
+                            "llm",
+                            "error",
+                            format!("LLM payload error: {detail}"),
+                        );
+                    }
                     return Err(AppError::HttpClient {
                         status: 200,
                         detail,
                     });
                 }
             }
+        }
+
+        if let Some(st) = log_sink {
+            st.push_api_log(
+                "llm",
+                "info",
+                format!("chat/completions 响应 OK HTTP {}", status.as_u16()),
+            );
         }
 
         Ok(payload)
@@ -753,7 +789,7 @@ async fn generate_dataset_caption_once(
             st.push_api_log("llm", "info", llm_request_log_preview);
         }
 
-        let client = shared_http_client();
+        let client = shared_llm_chat_client();
         let mut request = client.post(&endpoint).json(&request_body);
         if !api_key.is_empty() {
             request = request.bearer_auth(api_key);
@@ -765,18 +801,30 @@ async fn generate_dataset_caption_once(
         let response = match request.send().await {
             Ok(resp) => resp,
             Err(err) => {
-                let msg = err.to_string();
+                let msg = describe_network_error(&err.to_string());
+                print_llm_network_error_to_stderr("send", &msg);
                 if let Some(ref st) = log {
-                    st.push_api_log("llm", "error", format!("network: {msg}"));
+                    st.push_api_log("llm", "error", format!("network (send): {msg}"));
                 }
                 return Err(AppError::Network(msg));
             }
         };
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|err| AppError::Network(err.to_string()))?;
+        let body = match response.text().await {
+            Ok(text) => text,
+            Err(err) => {
+                let msg = describe_network_error(&err.to_string());
+                print_llm_network_error_to_stderr("read body", &msg);
+                if let Some(ref st) = log {
+                    st.push_api_log(
+                        "llm",
+                        "error",
+                        format!("network (read body) HTTP {} · {msg}", status.as_u16()),
+                    );
+                }
+                return Err(AppError::Network(msg));
+            }
+        };
 
         print_llm_http_response_body_to_stderr(status.as_u16(), &body);
 

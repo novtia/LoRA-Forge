@@ -74,7 +74,7 @@
   justify-content: center;
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: var(--text-main);
   cursor: pointer;
   border-radius: 0;
   padding: 0;
@@ -83,7 +83,7 @@
 
 .titlebar-action:hover:not(:disabled) {
   background: var(--bg-surface-alt);
-  color: var(--text-main);
+  color: var(--accent-acid);
 }
 
 .titlebar-action:disabled {
@@ -188,7 +188,7 @@
   height: 100%;
   background: transparent;
   border: none;
-  color: var(--text-muted);
+  color: var(--text-main);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -197,9 +197,19 @@
   transition: background 0.15s, color 0.15s;
 }
 
+.titlebar-btn svg {
+  flex-shrink: 0;
+  opacity: 0.92;
+  transition: opacity 0.12s ease;
+}
+
 .titlebar-btn:hover {
   background: var(--bg-surface-alt);
   color: var(--text-main);
+}
+
+.titlebar-btn:hover svg {
+  opacity: 1;
 }
 
 .titlebar-btn.close:hover {
@@ -207,24 +217,8 @@
   color: var(--text-dark);
 }
 
-.titlebar-btn.close:hover .titlebar-win-icon {
-  filter: none;
-}
-
 .titlebar-btn:focus {
   outline: none;
-}
-
-.titlebar-win-icon {
-  display: block;
-  flex-shrink: 0;
-  opacity: 0.88;
-  transition: opacity 0.12s ease, filter 0.12s ease;
-  filter: invert(1);
-}
-
-.titlebar-btn:hover .titlebar-win-icon {
-  opacity: 1;
 }
 
 /* ───── stage ───── */

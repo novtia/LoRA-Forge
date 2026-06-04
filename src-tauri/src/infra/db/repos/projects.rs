@@ -87,6 +87,41 @@ pub fn update_project_tags(
     Ok(())
 }
 
+pub fn update_project_record(
+    connection: &Connection,
+    project_id: &str,
+    name: &str,
+    root_path: &str,
+    dataset_path: &str,
+    output_path: &str,
+) -> AppResult<()> {
+    let rows = connection.execute(
+        "
+        UPDATE projects
+        SET name = ?1, root_path = ?2, dataset_path = ?3, output_path = ?4, updated_at = ?5
+        WHERE id = ?6
+        ",
+        params![name, root_path, dataset_path, output_path, now_ts(), project_id],
+    )?;
+    if rows == 0 {
+        return Err(AppError::NotFound(format!("Project '{project_id}' does not exist")));
+    }
+    Ok(())
+}
+
+/// 从应用库移除项目记录；不删除磁盘上的项目目录或文件。
+pub fn delete_project(connection: &Connection, project_id: &str) -> AppResult<()> {
+    connection.execute(
+        "DELETE FROM dataset_group_configs WHERE project_id = ?1",
+        params![project_id],
+    )?;
+    let rows = connection.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
+    if rows == 0 {
+        return Err(AppError::NotFound(format!("Project '{project_id}' does not exist")));
+    }
+    Ok(())
+}
+
 fn row_to_project(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRecord> {
     let tags_json: String = row.get(6)?;
     let tags = serde_json::from_str::<Vec<String>>(&tags_json).unwrap_or_default();

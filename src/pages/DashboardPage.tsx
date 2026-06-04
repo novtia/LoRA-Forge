@@ -11,13 +11,10 @@ import {
   ArrowRight,
   FolderOpen,
   Archive,
-  Image,
   Settings2,
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
   X,
 } from "lucide-react";
+import { ProjectGridCard } from "../components/dashboard/ProjectGridCard";
 import {
   createProject,
   getActiveJob,
@@ -28,10 +25,6 @@ import {
   onTrainingProgress,
   onTrainingState,
 } from "../lib/desktopApi";
-import {
-  formatBytes,
-  projectAccent,
-} from "../lib/formatters";
 import { useI18n } from "../lib/i18n";
 import { appendTrainingLog, normalizeActiveJobLogs } from "../lib/trainingLogs";
 import { TrainingConsoleLine } from "../components/project/TrainingConsolePanel";
@@ -51,24 +44,6 @@ function visibleRecentProjectCount(projectCount: number, slotsPerRow: number): n
   if (projectCount <= slotsPerRow) return projectCount;
   const maxProjectsWithMore = Math.max(1, slotsPerRow - 1);
   return maxProjectsWithMore;
-}
-
-function statusIcon(status: ProjectRecord["status"]) {
-  if (status === "error" || status === "aborted") {
-    return <XCircle size={14} />;
-  }
-  if (status === "paused" || status === "interrupted") {
-    return <AlertTriangle size={14} />;
-  }
-  return <CheckCircle size={14} />;
-}
-
-function statusColor(status: ProjectRecord["status"]) {
-  return status === "error" || status === "aborted"
-    ? "var(--accent-orange)"
-    : status === "paused" || status === "interrupted"
-      ? "var(--text-main)"
-      : "var(--accent-acid)";
 }
 
 export default function DashboardPage() {
@@ -450,42 +425,15 @@ export default function DashboardPage() {
         </div>
 
         {projects.slice(0, visibleRecentCount).map((project, index) => (
-          <Link key={project.id} to={`/project/${project.id}`} className="project-card-link">
-            <div className={`card project-card ${projectAccent(project, index)}`}>
-              <div className="card-header">
-                <span>{t("dashboard.loraModel")}</span>
-                <span>{formatRelative(project.updatedAt)}</span>
-              </div>
-              <div className="proj-img-placeholder">
-                {project.status === "error" || project.status === "aborted" ? (
-                  <AlertTriangle size={40} style={{ color: "var(--accent-orange)" }} />
-                ) : (
-                  <Image size={40} />
-                )}
-              </div>
-              <div className="proj-title">{project.name}</div>
-              <div className="proj-tags">
-                {project.tags.map((tag) => (
-                  <span key={tag} className="tag">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-              <div className="proj-footer">
-                <span>{t("common.size")}: {formatBytes(project.sizeBytes)}</span>
-                <span
-                  style={{
-                    color: statusColor(project.status),
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.25rem",
-                  }}
-                >
-                  {statusIcon(project.status)} {statusLabel(project.status)}
-                </span>
-              </div>
-            </div>
-          </Link>
+          <ProjectGridCard
+            key={project.id}
+            project={project}
+            index={index}
+            loraModelLabel={t("dashboard.loraModel")}
+            formatUpdatedAt={formatRelative}
+            onProjectsChanged={refreshProjects}
+            onError={setError}
+          />
         ))}
 
         {projects.length === 0 ? (

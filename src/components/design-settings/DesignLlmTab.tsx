@@ -13,11 +13,7 @@ import {
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import {
   applyBuiltinPromptSelection,
-  BUILTIN_PROMPT_ANIME_SD,
-  BUILTIN_PROMPT_EN,
   BUILTIN_PROMPT_FOLLOW_UI,
-  BUILTIN_PROMPT_STYLE_LORA,
-  BUILTIN_PROMPT_ZH_CN,
   createDefaultLlmSettings,
   DEFAULT_LLM_MAX_TOKENS,
   DEFAULT_LLM_CAPTION_RETRY_MAX,
@@ -26,6 +22,7 @@ import {
   resolveLlmPromptPresetSelection,
   resolveSystemPrompt,
 } from "./DesignLlmConfig";
+import { PROMPT_DOCS } from "../../lib/promptDocs";
 import { DesignLlmProviderPanel } from "./DesignLlmProviderPanel";
 import { loadBaiduTranslateSettings, loadLlmSettings, readTextFile, saveBaiduTranslateSettings, saveLlmSettings, writeTextFile } from "../../lib/desktopApi";
 import {
@@ -162,10 +159,8 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
         label: t("design.llmBuiltinPresetsGroup"),
         items: [
           { id: BUILTIN_PROMPT_FOLLOW_UI, label: t("design.llmBuiltinFollowUi") },
-          { id: BUILTIN_PROMPT_EN, label: t("design.llmBuiltinEnglish") },
-          { id: BUILTIN_PROMPT_ZH_CN, label: t("design.llmBuiltinZhCn") },
-          { id: BUILTIN_PROMPT_ANIME_SD, label: t("design.llmBuiltinAnimeSd") },
-          { id: BUILTIN_PROMPT_STYLE_LORA, label: t("design.llmBuiltinStyleLora") },
+          // Auto-discovered from `prompts/*.md`; the label is each file's frontmatter `name`.
+          ...PROMPT_DOCS.map((doc) => ({ id: doc.id, label: doc.name })),
         ],
       },
     ];
@@ -259,11 +254,7 @@ export function DesignLlmTab({ language, t }: DesignLlmTabProps) {
 
   useEffect(() => {
     setSettings((current) => {
-      if (
-        promptPresetSelection === BUILTIN_PROMPT_FOLLOW_UI ||
-        promptPresetSelection === BUILTIN_PROMPT_EN ||
-        promptPresetSelection === BUILTIN_PROMPT_ZH_CN
-      ) {
+      if (promptPresetSelection === BUILTIN_PROMPT_FOLLOW_UI) {
         const next = applyBuiltinPromptSelection(promptPresetSelection, language);
         if (next !== null && next !== current.systemPrompt) {
           return { ...current, systemPrompt: next };

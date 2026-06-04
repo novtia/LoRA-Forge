@@ -1013,8 +1013,10 @@ pub fn load_session(
 
 #[derive(Debug, Deserialize)]
 pub struct CreateProjectArgs {
-    name: String,
-    path: Option<String>,
+    #[serde(rename = "name")]
+    _name: String,
+    #[serde(rename = "path")]
+    _path: Option<String>,
 }
 
 #[tauri::command]

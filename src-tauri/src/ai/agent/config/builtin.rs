@@ -5,12 +5,12 @@
 //! The system-prompt bodies live in [`super::prompts`] so they can be
 //! reviewed / diffed independently of the wiring code here.
 //!
-//! - `general-purpose` — multi-step research/execution, full tool access.
-//! - `Explore`         — read-only investigation agent (fast).
-//! - `Plan`            — read-only planning agent (architect).
-//! - `claude-code-guide` — in-app guide; answers questions about this codebase.
-//! - `verification`    — background adversarial verifier (read-only project files).
-//! - `fork`            — synthetic; inherits parent prompt + tools.
+//! - `general-purpose` — LoRA 训练大师，全流程训练助手。
+//! - `Explore`         — 只读探查：数据集、配置、日志。
+//! - `Plan`            — 只读规划：训练方案与参数策略。
+//! - `claude-code-guide` — LoRA Forge 应用向导。
+//! - `verification`    — 训练质量验证（只读项目文件）。
+//! - `fork`            — 合成；继承父 prompt + tools。
 
 use crate::ai::agent::config::definition::{AgentDefinition, AgentSource};
 use crate::ai::agent::config::prompts;

@@ -18,14 +18,6 @@ pub const GEMINI_SDK: &str = "gemini";
 pub const CLAUDE_SDK: &str = "claude";
 pub const GROK_SDK: &str = "grok";
 pub const ARK_IMAGES_SDK: &str = "ark-images";
-pub const SUPPORTED_SDKS: &[&str] = &[
-    OPENAI_SDK,
-    OPENAI_RESPONSES_SDK,
-    GEMINI_SDK,
-    CLAUDE_SDK,
-    GROK_SDK,
-    ARK_IMAGES_SDK,
-];
 
 pub type ProviderFuture<'a> =
     Pin<Box<dyn Future<Output = AppResult<GenerateResponse>> + Send + 'a>>;
@@ -111,9 +103,4 @@ pub fn normalize_sdk(sdk: &str) -> String {
     } else {
         sdk
     }
-}
-
-pub fn is_supported_sdk(sdk: &str) -> bool {
-    let sdk = normalize_sdk(sdk);
-    SUPPORTED_SDKS.contains(&sdk.as_str())
 }

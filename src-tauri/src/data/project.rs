@@ -1,6 +1,5 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use ulid::Ulid;
 
 use crate::data::db::{now_ms, DbConn};
 use crate::data::settings::{validate_model_param_settings, ModelParamSettings, DEFAULT_HISTORY_TURNS};
@@ -81,34 +80,6 @@ pub fn upsert_from_lora(
     get(conn, id)
 }
 
-pub fn create(conn: &DbConn, name: &str, path: Option<&str>) -> AppResult<Project> {
-    let id = Ulid::new().to_string();
-    let now = now_ms();
-    let sort_order: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(sort_order), -1) + 1 FROM projects",
-            params![],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-    conn.execute(
-        "INSERT INTO projects(id, name, path, sort_order, created_at, updated_at) VALUES(?1,?2,?3,?4,?5,?5)",
-        params![id, name, path, sort_order, now],
-    )?;
-    Ok(Project {
-        id,
-        name: name.to_string(),
-        path: path.map(|s| s.to_string()),
-        sort_order,
-        system_prompt: String::new(),
-        history_turns: DEFAULT_HISTORY_TURNS,
-        llm_params: ModelParamSettings::default(),
-        context_window: None,
-        created_at: now,
-        updated_at: now,
-    })
-}
-
 pub fn list(conn: &DbConn) -> AppResult<Vec<Project>> {
     let sql = format!(
         "SELECT {SELECT_COLS} FROM projects ORDER BY sort_order ASC, created_at ASC"
@@ -131,18 +102,6 @@ pub fn get(conn: &DbConn, id: &str) -> AppResult<Project> {
     } else {
         Err(AppError::NotFound(format!("project {id}")))
     }
-}
-
-pub fn rename(conn: &DbConn, id: &str, name: &str) -> AppResult<()> {
-    let updated = now_ms();
-    let n = conn.execute(
-        "UPDATE projects SET name=?1, updated_at=?2 WHERE id=?3",
-        params![name, updated, id],
-    )?;
-    if n == 0 {
-        return Err(AppError::NotFound(format!("project {id}")));
-    }
-    Ok(())
 }
 
 pub fn update_config(
@@ -169,11 +128,6 @@ pub fn update_config(
     if n == 0 {
         return Err(AppError::NotFound(format!("project {id}")));
     }
-    Ok(())
-}
-
-pub fn delete(conn: &DbConn, id: &str) -> AppResult<()> {
-    conn.execute("DELETE FROM projects WHERE id=?1", params![id])?;
     Ok(())
 }
 

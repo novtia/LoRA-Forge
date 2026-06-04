@@ -17,21 +17,54 @@ pub(crate) const LOG_FIELD_TRUNCATE_CHARS: usize = 2000;
 
 const HTTP_CONNECT_TIMEOUT_SECS: u64 = 15;
 const HTTP_TOTAL_TIMEOUT_SECS: u64 = 180;
+/// 带图 + tool calling 的 chat/completions 可能超过 180s，单独放宽总超时。
+const HTTP_LLM_CHAT_TIMEOUT_SECS: u64 = 600;
 const HTTP_POOL_IDLE_SECS: u64 = 90;
 const USER_AGENT_VALUE: &str = concat!("lora-forge/", env!("CARGO_PKG_VERSION"));
+
+fn build_shared_client(total_timeout_secs: u64) -> Client {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(total_timeout_secs))
+        .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_SECS))
+        .user_agent(USER_AGENT_VALUE)
+        .build()
+        .expect("failed to build shared reqwest client")
+}
 
 /// 全局共享的 HTTP 客户端，避免每个请求都重建 TLS / 连接池。
 pub(crate) fn shared_http_client() -> &'static Client {
     static CLIENT: OnceLock<Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        Client::builder()
-            .connect_timeout(Duration::from_secs(HTTP_CONNECT_TIMEOUT_SECS))
-            .timeout(Duration::from_secs(HTTP_TOTAL_TIMEOUT_SECS))
-            .pool_idle_timeout(Duration::from_secs(HTTP_POOL_IDLE_SECS))
-            .user_agent(USER_AGENT_VALUE)
-            .build()
-            .expect("failed to build shared reqwest client")
-    })
+    CLIENT.get_or_init(|| build_shared_client(HTTP_TOTAL_TIMEOUT_SECS))
+}
+
+/// LLM chat/completions 专用客户端（更长总超时，避免慢模型 + 多轮 tool 被 180s 截断）。
+pub(crate) fn shared_llm_chat_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| build_shared_client(HTTP_LLM_CHAT_TIMEOUT_SECS))
+}
+
+/// 将 reqwest 网络错误转为更易读的诊断文案（含超时提示）。
+pub(crate) fn describe_network_error(raw: &str) -> String {
+    let lower = raw.to_ascii_lowercase();
+    if lower.contains("timed out") || lower.contains("timeout") {
+        return format!(
+            "{raw} (HTTP client total timeout is {}s for chat/completions)",
+            HTTP_LLM_CHAT_TIMEOUT_SECS
+        );
+    }
+    if lower.contains("decoding response body") {
+        return format!(
+            "{raw} (response body may be incomplete — often caused by timeout or connection drop during read; chat timeout is {}s)",
+            HTTP_LLM_CHAT_TIMEOUT_SECS
+        );
+    }
+    raw.to_string()
+}
+
+/// 网络层失败时写入 stderr（`tauri dev` 终端可见）。
+pub(crate) fn print_llm_network_error_to_stderr(phase: &str, detail: &str) {
+    eprintln!("[llm] network error during {phase}: {detail}");
 }
 
 pub(crate) fn openrouter_extra_headers(kind: EndpointKind) -> &'static [(&'static str, &'static str)] {

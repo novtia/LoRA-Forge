@@ -8,7 +8,7 @@ use crate::{
 };
 
 fn shared_client() -> &'static Client {
-    crate::llm::shared_http_client()
+    crate::llm::http::shared_http_client()
 }
 
 fn normalize_models_url(endpoint_url: &str) -> AppResult<String> {

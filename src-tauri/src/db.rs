@@ -21,7 +21,8 @@ pub use crate::infra::db::repos::{
         save_llm_settings,
     },
     projects::{
-        get_project, insert_project, list_projects, update_project_status, update_project_tags,
+        delete_project, get_project, insert_project, list_projects, update_project_record,
+        update_project_status, update_project_tags,
     },
     training::{
         load_diffusion_pipe_config, load_training_config, load_training_env,

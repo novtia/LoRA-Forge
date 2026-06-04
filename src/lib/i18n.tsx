@@ -127,7 +127,7 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.batchNoCaptionsToModify": "No images with existing captions in scope for conversation edit.",
     "dataset.batchConversationHintDesc":
       "Applied to every image in scope. Each image must already have a non-empty caption.",
-    "dataset.batchConversationScopeHint": "Only images with existing captions will be modified.",
+    "dataset.batchConversationScopeHint": "Conversation edit runs on every image in scope (empty captions are allowed).",
     "dataset.batchTaggingScope.label": "Batch tagging applies to",
     "dataset.batchTaggingScope.folderMenuAria": "Choose folder for batch tagging",
     "dataset.batchTaggingScope.selectionHint":
@@ -279,7 +279,7 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
       "Generate a new caption from the image (optional notes above). If the API rejects images, the model is remembered and future requests use text only.",
     "dataset.llmTagModeHintConversation":
       "Edit the current caption with natural-language instructions via internal tools. If the API rejects images, the model is remembered and future requests use text only.",
-    "dataset.llmUserHintLabelConversation": "Edit instruction (required)",
+    "dataset.llmUserHintLabelConversation": "Edit instruction (optional)",
     "dataset.llmUserHintPlaceholderConversation":
       "e.g. Change background to forest; remove quality tags; add long_hair and red_dress.",
     "dataset.llmUserHintDescConversation":
@@ -472,6 +472,8 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "errors.abortTrainer": "Failed to abort trainer",
     "errors.controlTrainer": "Failed to control trainer",
     "errors.createProject": "Failed to create project",
+    "errors.deleteProject": "Failed to remove project",
+    "errors.updateProject": "Failed to update project",
     "errors.deleteImage": "Failed to delete image",
     "errors.exportCheckpoint": "Failed to export checkpoint",
     "errors.generateCaption": "Failed to generate caption",
@@ -571,6 +573,17 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "projectList.loraModel": "LoRA Model",
     "projectList.subtitle": "{{count}} models in library",
     "projectList.title": "All Projects",
+    "projectMenu.delete": "Remove from Library",
+    "projectMenu.deleteConfirmBody":
+      "Remove \"{{name}}\" from the app library? Local files on disk will not be deleted.",
+    "projectMenu.deleteConfirmTitle": "Remove Project",
+    "projectMenu.edit": "Edit",
+    "projectMenu.editProject": "Edit Project",
+    "projectMenu.projectRootPath": "Project Root Folder",
+    "projectMenu.projectRootPathHint":
+      "Folder that contains dataset/ and output/. Only updates the app record; files are not moved.",
+    "projectMenu.projectRootPathPlaceholder": "Select the project root folder...",
+    "projectMenu.selectProjectRoot": "Select Project Root Folder",
     "relativeTime.daysAgo": "{{count}} days ago",
     "relativeTime.hoursAgo": "{{count}} hrs ago",
     "relativeTime.minutesAgo": "{{count}} min ago",
@@ -809,7 +822,7 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "dataset.batchNoCaptionsToModify": "当前范围内没有已有 caption 的图片，无法对话修改。",
     "dataset.batchConversationHintDesc":
       "将应用于范围内每张图片；每张图片须已有非空 caption。",
-    "dataset.batchConversationScopeHint": "仅会修改已有 caption 的图片。",
+    "dataset.batchConversationScopeHint": "对话修改会对范围内每张图执行（允许空 caption）。",
     "dataset.batchTaggingScope.label": "批量打标作用范围",
     "dataset.batchTaggingScope.folderMenuAria": "选择批量打标的文件夹",
     "dataset.batchTaggingScope.selectionHint":
@@ -894,7 +907,7 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
       "根据图片生成 caption（上方备注可选）。若 API 拒绝图片，会自动记录该模型并改用纯文本。",
     "dataset.llmTagModeHintConversation":
       "用自然语言修改当前 caption，模型通过内部工具增删改标签。若 API 拒绝图片，会自动记录该模型并改用纯文本。",
-    "dataset.llmUserHintLabelConversation": "修改指令（必填）",
+    "dataset.llmUserHintLabelConversation": "修改指令（可选）",
     "dataset.llmUserHintPlaceholderConversation":
       "例如：背景改成森林；去掉质量词；加上 long_hair 和 red_dress。",
     "dataset.llmUserHintDescConversation":
@@ -1148,6 +1161,8 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "errors.abortTrainer": "中止训练器失败",
     "errors.controlTrainer": "控制训练器失败",
     "errors.createProject": "创建项目失败",
+    "errors.deleteProject": "移除项目失败",
+    "errors.updateProject": "更新项目失败",
     "errors.deleteImage": "删除图片失败",
     "errors.exportCheckpoint": "导出检查点失败",
     "errors.generateCaption": "生成标签失败",
@@ -1243,6 +1258,17 @@ const MESSAGES: Record<SupportedLanguage, Record<string, string>> = {
     "projectList.loraModel": "LoRA 模型",
     "projectList.subtitle": "库中共有 {{count}} 个模型",
     "projectList.title": "全部项目",
+    "projectMenu.delete": "从库中移除",
+    "projectMenu.deleteConfirmBody":
+      "确定从应用库中移除「{{name}}」？不会删除磁盘上的本地文件。",
+    "projectMenu.deleteConfirmTitle": "移除项目",
+    "projectMenu.edit": "编辑",
+    "projectMenu.editProject": "编辑项目",
+    "projectMenu.projectRootPath": "项目根目录",
+    "projectMenu.projectRootPathHint":
+      "应包含 dataset/ 与 output/ 的文件夹。仅更新应用中的路径记录，不会移动磁盘文件。",
+    "projectMenu.projectRootPathPlaceholder": "选择项目根目录...",
+    "projectMenu.selectProjectRoot": "选择项目根目录",
     "relativeTime.daysAgo": "{{count}} 天前",
     "relativeTime.hoursAgo": "{{count}} 小时前",
     "relativeTime.minutesAgo": "{{count}} 分钟前",

@@ -74,10 +74,10 @@ pub async fn compact(
     summary_req.tool_results.clear();
     summary_req.pending_assistant_turn = None;
     summary_req.attachments.clear();
-    summary_req.system_prompt = "You are a context-compaction assistant. \
-        Summarise the conversation above so a fresh model can pick it up. \
-        Preserve: decisions made, file paths touched, errors hit, pending TODOs, \
-        and any user-stated constraints. Drop pleasantries and redundant chatter."
+    summary_req.system_prompt = "你是 LoRA 训练对话的上下文压缩助手。\
+        将上方对话压缩为摘要，使新模型能无缝接续。必须保留：\
+        LoRA 类型与目标、已确定的训练参数、数据集/路径、打标与触发词决策、\
+        采样结论、报错与待办、用户明确约束。省略寒暄与重复内容。"
         .to_string();
     summary_req.prompt = format!(
         "Produce a concise summary in at most {} words. Reply with the summary only.",

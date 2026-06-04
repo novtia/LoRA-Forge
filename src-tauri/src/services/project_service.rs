@@ -71,3 +71,68 @@ pub fn create_project(state: AppState, name: &str, root_path: &str) -> AppResult
 
     get_project(state, &project.id)
 }
+
+fn ensure_not_training(state: &AppState, project: &ProjectRecord) -> AppResult<()> {
+    if matches!(
+        project.status,
+        ProjectStatus::Running | ProjectStatus::Paused
+    ) {
+        return Err(AppError::Validation(
+            "Cannot update a project while training is active".to_string(),
+        ));
+    }
+    if state.runtime_job(&project.id)?.is_some() {
+        return Err(AppError::Validation(
+            "Cannot update a project while training is active".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// 更新项目名称与项目根路径（仅更新数据库指针；不移动磁盘文件）。
+pub fn update_project(
+    state: AppState,
+    project_id: &str,
+    name: &str,
+    root_path: &str,
+) -> AppResult<ProjectRecord> {
+    let name = name.trim();
+    let root_path = root_path.trim();
+    if name.is_empty() {
+        return Err(AppError::Validation("Project name is required".to_string()));
+    }
+    if root_path.is_empty() {
+        return Err(AppError::Validation("Project path is required".to_string()));
+    }
+
+    let project = state.with_db(|connection| db::get_project(connection, project_id))?;
+    ensure_not_training(&state, &project)?;
+
+    let project_root = ensure_existing_dir(Path::new(root_path))?;
+    let dataset_path = project_root.join("dataset");
+    let output_path = project_root.join("output");
+    fs::create_dir_all(&dataset_path)?;
+    fs::create_dir_all(&output_path)?;
+
+    state.with_db(|connection| {
+        db::update_project_record(
+            connection,
+            project_id,
+            name,
+            &normalize_display_path(&project_root),
+            &normalize_display_path(&dataset_path),
+            &normalize_display_path(&output_path),
+        )
+    })?;
+
+    get_project(state, project_id)
+}
+
+/// 从应用库移除项目；不删除磁盘文件。训练进行中时不允许删除。
+pub fn delete_project(state: AppState, project_id: &str) -> AppResult<()> {
+    let project = state.with_db(|connection| db::get_project(connection, project_id))?;
+    ensure_not_training(&state, &project)?;
+    state.with_db(|connection| db::delete_project(connection, project_id))?;
+    state.remove_runtime_job(project_id).ok();
+    Ok(())
+}

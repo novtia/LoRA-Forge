@@ -27,6 +27,8 @@ pub fn run() {
             crate::commands::projects::list_projects,
             crate::commands::projects::get_project,
             crate::commands::projects::create_project,
+            crate::commands::projects::update_lora_project,
+            crate::commands::projects::delete_lora_project,
             crate::commands::settings::load_training_config,
             crate::commands::settings::save_training_config,
             crate::commands::settings::load_training_env,

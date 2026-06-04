@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Copy, Minus, Square, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 interface TitleBarProps {
@@ -12,13 +13,6 @@ interface TitleBarProps {
   onNewChat?: () => void;
   onOpenSearch?: () => void;
 }
-
-const WIN_ICONS = {
-  minimize: "/horizontal-line.svg",
-  maximize: "/maximize-button.svg",
-  restore: "/Restore%20Down.svg",
-  close: "/close.svg",
-} as const;
 
 type MenuItem =
   | { type: "action"; label: string; onClick: () => void; disabled?: boolean }
@@ -206,14 +200,7 @@ export function TitleBar({
           title={t("titlebar.minimize")}
           onClick={onMinimize}
         >
-          <img
-            className="titlebar-win-icon"
-            src={WIN_ICONS.minimize}
-            alt=""
-            width={11}
-            height={11}
-            draggable={false}
-          />
+          <Minus size={14} aria-hidden="true" />
         </button>
         <button
           type="button"
@@ -222,14 +209,7 @@ export function TitleBar({
           title={maximized ? t("titlebar.restore") : t("titlebar.maximize")}
           onClick={onToggleMax}
         >
-          <img
-            className="titlebar-win-icon"
-            src={maximized ? WIN_ICONS.restore : WIN_ICONS.maximize}
-            alt=""
-            width={11}
-            height={11}
-            draggable={false}
-          />
+          {maximized ? <Copy size={11} aria-hidden="true" /> : <Square size={11} aria-hidden="true" />}
         </button>
         <button
           type="button"
@@ -238,14 +218,7 @@ export function TitleBar({
           title={t("titlebar.close")}
           onClick={onClose}
         >
-          <img
-            className="titlebar-win-icon"
-            src={WIN_ICONS.close}
-            alt=""
-            width={11}
-            height={11}
-            draggable={false}
-          />
+          <X size={14} aria-hidden="true" />
         </button>
       </div>
     </div>

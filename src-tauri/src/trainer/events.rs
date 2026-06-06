@@ -8,5 +8,8 @@ pub const TRAINING_LOG_EVENT: &str = "training-log-line";
 pub const TRAINING_STATE_EVENT: &str = "training-state-changed";
 pub const SYSTEM_STATS_EVENT: &str = "system-stats-updated";
 
+pub const REPO_TASK_LOG_EVENT: &str = "repo-task-log";
+pub const REPO_TASK_STATE_EVENT: &str = "repo-task-state";
+
 pub const STRUCTURED_LOG_PREFIX: &str = "@@LORA_FORGE_LOG@@";
 pub const STRUCTURED_LOG_SCHEMA: &str = "lora-forge.training.log/v1";

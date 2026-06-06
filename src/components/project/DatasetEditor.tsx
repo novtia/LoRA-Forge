@@ -32,6 +32,7 @@ import { looksLikeStyleArtistTrainingConfig } from "../../lib/presets";
 import {
   loadDatasetEditorFormPersist,
   saveDatasetEditorFormPersist,
+  type DatasetEditorBatchExecutionMode,
   type DatasetEditorTriggerScope,
 } from "../../lib/datasetEditorPersistence";
 import { contiguousTagRangeForSelection, splitCaptionTags, charRangeForContiguousTagIndices } from "../../lib/captionSegments";
@@ -87,6 +88,9 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const [fileToolsFlyoutOpen, setFileToolsFlyoutOpen] = useState(false);
   const [apiLogLines, setApiLogLines] = useState<ApiLogEntry[]>([]);
   const [taggingMode, setTaggingMode] = useState<"all" | "range">("all");
+  /** 批量打标执行方式：顺序（一张接一张）或并行（每张独立并发）。 */
+  const [batchExecutionMode, setBatchExecutionMode] =
+    useState<DatasetEditorBatchExecutionMode>("sequential");
   const [batchTaggingScope, setBatchTaggingScope] = useState<DatasetEditorTriggerScope>("all");
   /** Folder path when `batchTaggingScope === "group"`; "" = images at dataset root only. */
   const [batchTaggingGroupPath, setBatchTaggingGroupPath] = useState("");
@@ -214,6 +218,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     setBatchTaggingGroupPath(saved?.batchTaggingGroupPath ?? "");
     setImageRange(saved?.imageRange ?? "");
     setTaggingMode(saved?.taggingMode === "range" ? "range" : "all");
+    setBatchExecutionMode(saved?.batchExecutionMode === "parallel" ? "parallel" : "sequential");
     setOnlyUntagged(Boolean(saved?.onlyUntagged));
     setPreviewDockOpen(Boolean(saved?.previewDockOpen));
     lastRestoredImagePathRef.current = saved?.lastImageRelativePath?.trim() || null;
@@ -259,6 +264,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       batchTaggingGroupPath,
       imageRange,
       taggingMode,
+      batchExecutionMode,
       onlyUntagged,
       previewDockOpen,
       lastImageRelativePath: activePath,
@@ -279,6 +285,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     batchTaggingGroupPath,
     imageRange,
     taggingMode,
+    batchExecutionMode,
     onlyUntagged,
     previewDockOpen,
   ]);
@@ -1014,6 +1021,10 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const batchProgressRef = useRef<BatchProgress | null>(null);
   batchProgressRef.current = batchProgress;
 
+  /** 批量执行方式，供「停止批量」按钮决定取消单张还是全部在途打标。 */
+  const batchExecutionModeRef = useRef(batchExecutionMode);
+  batchExecutionModeRef.current = batchExecutionMode;
+
   /** 当前单图是否正在打标（仅作用于这一张，不会因为别的图在打标而禁用）。 */
   const currentImageTagging = currentImage
     ? taggingPaths.has(currentImage.relativePath)
@@ -1518,8 +1529,16 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     if (path) void cancelLlmCaption(projectId, path);
   }, [projectId]);
 
-  /** 停止批量打标：精确取消批量当前正在处理的那一张。 */
+  /**
+   * 停止批量打标：
+   * - 并行模式下同时有多张在途，取消「全部」在途打标；
+   * - 顺序模式下只有一张在跑，精确取消当前那一张即可。
+   */
   const handleStopBatchTagging = useCallback(() => {
+    if (batchExecutionModeRef.current === "parallel") {
+      void cancelLlmCaption();
+      return;
+    }
     const path = batchProgressRef.current?.relativePath;
     if (path) void cancelLlmCaption(projectId, path);
     else void cancelLlmCaption();
@@ -1567,6 +1586,88 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     setError(null);
     setBatchProgress(null);
 
+    /** 汇总打标结果到错误提示区（成功不提示、取消/失败给出统计）。 */
+    const reportOutcome = (ok: number, fail: number, lastErr: string, userCancelled: boolean) => {
+      if (userCancelled) {
+        setError(ok > 0 ? t("dataset.batchTaggingStoppedWithOk", { ok }) : t("dataset.batchTaggingStopped"));
+      } else if (fail > 0) {
+        const summary = t("dataset.batchTaggingSummary", { ok, fail });
+        setError(lastErr ? `${summary} ${lastErr}` : summary);
+      }
+    };
+
+    // 并行模式：每张图作为独立请求同时发起，互不影响。
+    // 没有跨图上下文链接（不传 previousAssistantCaption），进度按完成数累加。
+    if (batchExecutionMode === "parallel") {
+      const total = targets.length;
+      let ok = 0;
+      let fail = 0;
+      let lastErr = "";
+      let userCancelled = false;
+      let completed = 0;
+      startTransition(() => {
+        setBatchProgress({ current: 0, total, currentName: "", relativePath: "" });
+      });
+      try {
+        await Promise.all(
+          targets.map(async (entry) => {
+            try {
+              let nextCaption: string;
+              if (isConversation) {
+                let currentCaption = "";
+                try {
+                  currentCaption = (await readCaption(projectId, entry.relativePath)).trim();
+                } catch {
+                  currentCaption = "";
+                }
+                nextCaption = await autoTagImage(
+                  projectId,
+                  entry.relativePath,
+                  hint,
+                  undefined,
+                  undefined,
+                  llmTagMode,
+                  currentCaption,
+                );
+              } else {
+                nextCaption = await autoTagImage(
+                  projectId,
+                  entry.relativePath,
+                  hint.length > 0 ? hint : undefined,
+                  undefined,
+                  undefined,
+                  llmTagMode,
+                );
+              }
+              await writeCaption(projectId, entry.relativePath, nextCaption);
+              ok++;
+              if (currentImagePathRef.current === entry.relativePath) {
+                await loadAsset(entry.relativePath);
+              }
+            } catch (itemError) {
+              if (isCaptionCancelledError(itemError)) {
+                userCancelled = true;
+              } else {
+                fail++;
+                lastErr = getErrorMessage(itemError, t("errors.generateCaption"));
+              }
+            } finally {
+              completed++;
+              startTransition(() => {
+                setBatchProgress({ current: completed, total, currentName: entry.name, relativePath: "" });
+              });
+            }
+          }),
+        );
+        reportOutcome(ok, fail, lastErr, userCancelled);
+      } finally {
+        setBatchProgress(null);
+        setBusy(null);
+      }
+      return;
+    }
+
+    // 顺序模式（默认）：一张接一张排队，可把上一张 caption 作为上下文注入下一张。
     let ok = 0;
     let fail = 0;
     let lastErr = "";
@@ -1646,18 +1747,14 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         }
       }
 
-      if (userCancelled) {
-        setError(ok > 0 ? t("dataset.batchTaggingStoppedWithOk", { ok }) : t("dataset.batchTaggingStopped"));
-      } else if (fail > 0) {
-        const summary = t("dataset.batchTaggingSummary", { ok, fail });
-        setError(lastErr ? `${summary} ${lastErr}` : summary);
-      }
+      reportOutcome(ok, fail, lastErr, userCancelled);
     } finally {
       setBatchProgress(null);
       setBusy(null);
     }
   }, [
     busy,
+    batchExecutionMode,
     batchTaggingTargetEntries,
     currentImage?.relativePath,
     imageEntries.length,
@@ -1828,6 +1925,8 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         batchTaggingFolderOptions={triggerGroupFolderOptions}
         taggingMode={taggingMode}
         setTaggingMode={setTaggingMode}
+        batchExecutionMode={batchExecutionMode}
+        setBatchExecutionMode={setBatchExecutionMode}
         imageRange={imageRange}
         setImageRange={setImageRange}
         busy={busy}

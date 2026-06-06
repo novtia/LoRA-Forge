@@ -109,6 +109,86 @@ export interface TrainingEnvSettings {
   numGpus: number;
 }
 
+/** Where a training repo lives: native Windows git vs WSL bash git. */
+export type TrainingRepoTarget = "windows" | "wsl";
+
+export interface TrainingRepoStatus {
+  id: string;
+  name: string;
+  description: string;
+  target: TrainingRepoTarget;
+  gitUrl: string;
+  installPath: string;
+  installed: boolean;
+  currentBranch: string | null;
+  currentCommit: string | null;
+  isCustom: boolean;
+}
+
+export interface CustomRepoInput {
+  name: string;
+  gitUrl: string;
+  target: TrainingRepoTarget;
+  installPath: string;
+}
+
+export type RepoTaskKind = "download" | "update" | "delete";
+export type RepoTaskStatus = "running" | "completed" | "failed";
+
+export interface RepoTaskLogEvent {
+  repoId: string;
+  taskId: string;
+  line: string;
+  level: string;
+}
+
+export interface RepoTaskStateEvent {
+  repoId: string;
+  taskId: string;
+  kind: RepoTaskKind;
+  status: RepoTaskStatus;
+  message: string | null;
+}
+
+export interface PythonRuntime {
+  label: string;
+  version: string;
+  path: string;
+  /** `windows` | `wsl`. */
+  source: string;
+}
+
+export interface WslDistroInfo {
+  name: string;
+  state: string;
+  version: string;
+  isDefault: boolean;
+}
+
+export interface CudaInfo {
+  available: boolean;
+  driverVersion: string;
+  cudaVersion: string;
+  gpuName: string;
+  nvccVersion: string;
+}
+
+export interface DiskInfo {
+  name: string;
+  usedGb: number;
+  totalGb: number;
+  freeGb: number;
+}
+
+export interface EnvironmentReport {
+  pythons: PythonRuntime[];
+  wslDistros: WslDistroInfo[];
+  gitVersion: string;
+  cuda: CudaInfo;
+  disks: DiskInfo[];
+  detectedAt: number;
+}
+
 export interface DiffusionPipeConfig {
   modelType: string;
   modelPath: string;

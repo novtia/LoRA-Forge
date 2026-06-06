@@ -2,6 +2,7 @@
 pub mod events;
 pub mod log_parser;
 pub mod mock;
+pub mod repos;
 pub mod sd_scripts;
 pub mod stats;
 

@@ -5,6 +5,7 @@
 
 pub mod api_log;
 pub mod dataset;
+pub mod environment;
 pub mod llm;
 pub mod projects;
 pub mod settings;

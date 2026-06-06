@@ -68,6 +68,13 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
             updated_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS training_repos (
+            id TEXT PRIMARY KEY,
+            config_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS dataset_group_configs (
             project_id TEXT NOT NULL,
             group_path TEXT NOT NULL,

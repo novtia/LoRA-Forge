@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { DesignInterfaceTab } from "../components/design-settings/DesignInterfaceTab";
 import { DesignLlmTab } from "../components/design-settings/DesignLlmTab";
-import { DesignTrainingEnvTab } from "../components/design-settings/DesignTrainingEnvTab";
+import { DesignEnvironmentTab } from "../components/design-settings/DesignEnvironmentTab";
 import { DesignPaletteTab } from "../components/design-settings/DesignPaletteTab";
 import { DesignProfileTab } from "../components/design-settings/DesignProfileTab";
 import { DesignSettingsHeader } from "../components/design-settings/DesignSettingsHeader";
@@ -13,6 +13,7 @@ import { getDesignPresetCopy, useI18n } from "../lib/i18n";
 
 type RouteState = {
   from?: string;
+  tab?: DesignTab;
 };
 
 export default function DesignSettingsPage() {
@@ -21,9 +22,10 @@ export default function DesignSettingsPage() {
   const { settings, activePreset, updateSettings, setPreset, resetSettings } = useDesignSettings();
   const { language, setLanguage, t } = useI18n();
 
-  const [activeTab, setActiveTab] = useState<DesignTab>("profile");
+  const routeState = location.state as RouteState | null;
+  const [activeTab, setActiveTab] = useState<DesignTab>(routeState?.tab ?? "profile");
 
-  const backTarget = (location.state as RouteState | null)?.from ?? "/";
+  const backTarget = routeState?.from ?? "/";
   const activePresetCopy = useMemo(() => getDesignPresetCopy(t, activePreset.id), [activePreset.id, t]);
 
   const signalSummary = useMemo<SignalSummaryItem[]>(
@@ -85,7 +87,7 @@ export default function DesignSettingsPage() {
           />
         )}
 
-        {activeTab === "training" && <DesignTrainingEnvTab t={t} />}
+        {activeTab === "env" && <DesignEnvironmentTab t={t} />}
 
         {activeTab === "llm" && <DesignLlmTab language={language} t={t} />}
       </div>

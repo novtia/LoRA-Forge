@@ -7,5 +7,5 @@
 #[allow(unused_imports)]
 pub use crate::infra::{
     paths::AppPaths,
-    state::{AppState, RuntimeJob, RuntimeJobControlMode},
+    state::{AppState, RepoTask, RuntimeJob, RuntimeJobControlMode},
 };

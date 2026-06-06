@@ -4,23 +4,28 @@ import type {
   ActiveJobSummary,
   ApiLogEntry,
   BaiduTranslateSettings,
+  CustomRepoInput,
   DatasetAsset,
   DatasetPreviewAsset,
   DatasetEntry,
   BatchDatasetImageMutationResult,
   DiffusionPipeConfig,
+  EnvironmentReport,
   LlmGlobalSettings,
   LlmProvider,
   LlmProviderModelEntry,
   LlmProviderSummary,
   LlmSettings,
   ProjectRecord,
+  RepoTaskLogEvent,
+  RepoTaskStateEvent,
   SampleImageEntry,
   SystemStats,
   TrainingConfig,
   TrainingEnvSettings,
   TrainingLogEvent,
   TrainingProgressEvent,
+  TrainingRepoStatus,
   TrainingStateChangedEvent,
 } from "./types";
 import type { CaptionTagMode } from "./types";
@@ -90,6 +95,42 @@ export function saveTrainingEnv(settings: TrainingEnvSettings): Promise<Training
       settings,
     },
   });
+}
+
+// ── Training environment manager ──────────────────────────────────────────────
+
+export function listTrainingRepos(): Promise<TrainingRepoStatus[]> {
+  return invoke("list_training_repos");
+}
+
+export function addCustomRepo(input: CustomRepoInput): Promise<TrainingRepoStatus[]> {
+  return invoke("add_custom_repo", { input });
+}
+
+export function removeCustomRepo(repoId: string): Promise<TrainingRepoStatus[]> {
+  return invoke("remove_custom_repo", { repoId });
+}
+
+/** Starts an async clone and returns the task id; progress arrives via `onRepoTaskLog`/`onRepoTaskState`. */
+export function downloadRepo(repoId: string): Promise<string> {
+  return invoke("download_repo", { repoId });
+}
+
+/** Starts an async `git pull` and returns the task id. */
+export function updateRepo(repoId: string): Promise<string> {
+  return invoke("update_repo", { repoId });
+}
+
+export function deleteRepo(repoId: string): Promise<void> {
+  return invoke("delete_repo", { repoId });
+}
+
+export function cancelRepoTask(taskId: string): Promise<void> {
+  return invoke("cancel_repo_task", { taskId });
+}
+
+export function inspectEnvironment(): Promise<EnvironmentReport> {
+  return invoke("inspect_environment");
 }
 
 export function loadLlmSettings(): Promise<LlmSettings> {
@@ -483,4 +524,16 @@ export function onSystemStats(
   handler: (stats: SystemStats) => void,
 ): Promise<UnlistenFn> {
   return listen<SystemStats>("system-stats-updated", (event) => handler(event.payload));
+}
+
+export function onRepoTaskLog(
+  handler: (event: RepoTaskLogEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<RepoTaskLogEvent>("repo-task-log", (event) => handler(event.payload));
+}
+
+export function onRepoTaskState(
+  handler: (event: RepoTaskStateEvent) => void,
+): Promise<UnlistenFn> {
+  return listen<RepoTaskStateEvent>("repo-task-state", (event) => handler(event.payload));
 }

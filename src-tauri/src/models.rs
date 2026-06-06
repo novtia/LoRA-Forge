@@ -7,7 +7,10 @@
 #[allow(unused_imports)]
 pub use crate::domain::{
     baidu::BaiduTranslateSettings,
-    common::{ApiLogEntry, HardwareInfo, SystemStats},
+    common::{
+        ApiLogEntry, CudaInfo, DiskInfo, EnvironmentReport, HardwareInfo, PythonRuntime,
+        SystemStats, WslDistroInfo,
+    },
     dataset::{
         BatchDatasetImageMutationResult, DatasetAsset, DatasetEntry, DatasetEntryKind,
         DatasetGroupType, DatasetImagePathMapping, DatasetPreviewAsset, SampleImageEntry,
@@ -19,8 +22,9 @@ pub use crate::domain::{
     },
     project::{ProjectRecord, ProjectStatus},
     training::{
-        ActiveJobSummary, DiffusionPipeConfig, JobStatus, LossPoint, TrainingConfig,
-        TrainingEnvSettings, TrainingLogEvent, TrainingLogLine, TrainingProgressEvent,
+        ActiveJobSummary, CustomRepoInput, CustomRepoRecord, DiffusionPipeConfig, JobStatus,
+        LossPoint, RepoTaskLogEvent, RepoTaskStateEvent, TrainingConfig, TrainingEnvSettings,
+        TrainingLogEvent, TrainingLogLine, TrainingProgressEvent, TrainingRepoStatus,
         TrainingSnapshot, TrainingStateChangedEvent,
     },
 };

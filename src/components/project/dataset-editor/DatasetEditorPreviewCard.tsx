@@ -10,7 +10,10 @@ import {
   StopCircle,
   X,
 } from "lucide-react";
-import type { DatasetEditorTriggerScope } from "../../../lib/datasetEditorPersistence";
+import type {
+  DatasetEditorBatchExecutionMode,
+  DatasetEditorTriggerScope,
+} from "../../../lib/datasetEditorPersistence";
 import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry } from "../../../lib/types";
 import { useI18n } from "../../../lib/i18n";
 import FileAssetImage from "../../FileAssetImage";
@@ -44,6 +47,8 @@ type Props = {
   batchTaggingFolderOptions: TriggerScopeFolderOption[];
   taggingMode: "all" | "range";
   setTaggingMode: (mode: "all" | "range") => void;
+  batchExecutionMode: DatasetEditorBatchExecutionMode;
+  setBatchExecutionMode: (mode: DatasetEditorBatchExecutionMode) => void;
   imageRange: string;
   setImageRange: (value: string) => void;
   busy: string | null;
@@ -105,6 +110,8 @@ export function DatasetEditorPreviewCard({
   batchTaggingFolderOptions,
   taggingMode,
   setTaggingMode,
+  batchExecutionMode,
+  setBatchExecutionMode,
   imageRange,
   setImageRange,
   busy,
@@ -442,6 +449,71 @@ export function DatasetEditorPreviewCard({
                 ) : null}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                  <label className="form-label">{t("dataset.batchExecutionMode")}</label>
+                  <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
+                    {t("dataset.batchExecModeHint")}
+                  </div>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: "0.5rem",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      className="btn"
+                      aria-pressed={batchExecutionMode === "sequential"}
+                      disabled={busy !== null}
+                      onClick={() => setBatchExecutionMode("sequential")}
+                      style={{
+                        justifyContent: "center",
+                        padding: "0.75rem",
+                        borderColor:
+                          batchExecutionMode === "sequential"
+                            ? "var(--accent-acid)"
+                            : "var(--border-dim)",
+                        background:
+                          batchExecutionMode === "sequential"
+                            ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
+                            : "transparent",
+                        color:
+                          batchExecutionMode === "sequential"
+                            ? "var(--text-main)"
+                            : "var(--text-muted)",
+                      }}
+                    >
+                      {t("dataset.batchExecSequential")}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn"
+                      aria-pressed={batchExecutionMode === "parallel"}
+                      disabled={busy !== null}
+                      onClick={() => setBatchExecutionMode("parallel")}
+                      style={{
+                        justifyContent: "center",
+                        padding: "0.75rem",
+                        borderColor:
+                          batchExecutionMode === "parallel"
+                            ? "var(--accent-acid)"
+                            : "var(--border-dim)",
+                        background:
+                          batchExecutionMode === "parallel"
+                            ? "color-mix(in srgb, var(--accent-acid) 14%, transparent)"
+                            : "transparent",
+                        color:
+                          batchExecutionMode === "parallel"
+                            ? "var(--text-main)"
+                            : "var(--text-muted)",
+                      }}
+                    >
+                      {t("dataset.batchExecParallel")}
+                    </button>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
                   <label className="form-label">{t("dataset.taggingMode")}</label>
                   <div style={{ fontSize: "0.72rem", color: "var(--text-muted)", lineHeight: 1.35 }}>
                     {t("dataset.taggingModeHint")}
@@ -572,7 +644,9 @@ export function DatasetEditorPreviewCard({
                         lineHeight: 1.35,
                       }}
                     >
-                      {t("dataset.batchTaggingCurrent", { name: batchProgress.currentName })}
+                      {batchExecutionMode === "parallel"
+                        ? t("dataset.batchTaggingParallelActive", { total: batchProgress.total })
+                        : t("dataset.batchTaggingCurrent", { name: batchProgress.currentName })}
                     </div>
                   </div>
                 ) : null}

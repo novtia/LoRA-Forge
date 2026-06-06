@@ -4,6 +4,7 @@
  */
 
 pub mod db;
+pub mod environment;
 pub mod hardware;
 pub mod paths;
 pub mod process;

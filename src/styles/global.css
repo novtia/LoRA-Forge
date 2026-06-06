@@ -2799,6 +2799,362 @@ textarea.form-input:focus {
   animation: lf-icon-spin 0.75s linear infinite;
 }
 
+/* Environment manager: read-only inspector key/value rows */
+.env-kv {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.env-kv-key {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.env-kv-val {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  word-break: break-word;
+}
+
+.env-kv-path {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+/* Environment settings: left nav + right content layout */
+.env-settings-layout {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+.env-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 250px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 1rem;
+}
+
+.env-settings-nav-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-primary);
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+
+.env-settings-nav-item:hover {
+  border-color: var(--accent-acid);
+}
+
+.env-settings-nav-item.active {
+  border-color: var(--accent-acid);
+  background: color-mix(in srgb, var(--accent-acid) 12%, transparent);
+}
+
+.env-settings-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0.1rem;
+  color: var(--accent-acid);
+}
+
+.env-settings-nav-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.env-settings-nav-label {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.env-settings-nav-desc {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.env-settings-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.env-settings-content > .card {
+  width: 100%;
+}
+
+/* Training repo manager */
+.repo-manager .card-header {
+  margin-bottom: 0.35rem;
+}
+
+.repo-manager-desc {
+  margin: 0 0 1rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.repo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.repo-list-empty {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.repo-card {
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  padding: 1rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  background: color-mix(in srgb, var(--bg-surface) 92%, var(--accent-acid) 8%);
+  transition: border-color 0.15s ease;
+}
+
+.repo-card:hover {
+  border-color: color-mix(in srgb, var(--border) 55%, var(--accent-acid) 45%);
+}
+
+.repo-card-installed {
+  background: color-mix(in srgb, var(--bg-surface) 88%, var(--accent-acid) 12%);
+}
+
+.repo-card-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem 1.25rem;
+  align-items: start;
+}
+
+.repo-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.repo-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.repo-card-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text-main);
+}
+
+.repo-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.repo-card-badge-target {
+  text-transform: uppercase;
+  font-size: 0.65rem;
+}
+
+.repo-card-badge-muted {
+  font-size: 0.65rem;
+  opacity: 0.7;
+}
+
+.repo-card-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.repo-card-meta {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-base) 65%, transparent);
+}
+
+.repo-meta-line,
+.repo-meta-segment {
+  display: grid;
+  grid-template-columns: 5.25rem minmax(0, 1fr);
+  gap: 0.65rem;
+  align-items: baseline;
+  padding: 0.5rem 0.85rem;
+}
+
+.repo-meta-line {
+  border-bottom: 1px solid var(--border);
+}
+
+.repo-meta-line:last-child {
+  border-bottom: none;
+}
+
+.repo-meta-line dt,
+.repo-meta-segment dt {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.repo-meta-line dd,
+.repo-meta-segment dd {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
+.repo-meta-line dd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.repo-meta-segment dd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.repo-meta-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--border);
+}
+
+.repo-meta-segment {
+  border-right: 1px solid var(--border);
+}
+
+.repo-meta-segment:last-child {
+  border-right: none;
+}
+
+.repo-card-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.45rem;
+  min-width: 7.5rem;
+  padding-top: 0.15rem;
+}
+
+.repo-card-actions .btn {
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.repo-card-busy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.repo-card-log {
+  max-height: 180px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.repo-card-log-failed {
+  border: 1px solid var(--accent-orange);
+}
+
+.repo-card-log-error {
+  color: var(--accent-orange);
+}
+
+@media (max-width: 820px) {
+  .repo-card-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .repo-card-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    min-width: 0;
+    padding-top: 0;
+  }
+
+  .repo-meta-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .repo-meta-segment {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .repo-meta-segment:last-child {
+    border-bottom: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .env-settings-layout {
+    flex-direction: column;
+  }
+
+  .env-settings-nav {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    position: static;
+  }
+
+  .env-settings-nav-item {
+    flex: 1 1 180px;
+  }
+}
+
 /* Dataset editor: 触发词插入位置 + 作用范围（与 captions 卡片对齐） */
 .lf-trigger-pos-picker {
   font-family: var(--font-display);

@@ -1,4 +1,4 @@
-export type DesignTab = "profile" | "palette" | "interface" | "training" | "llm";
+export type DesignTab = "profile" | "palette" | "interface" | "env" | "llm";
 
 export interface SignalSummaryItem {
   label: string;

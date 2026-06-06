@@ -61,3 +61,57 @@ pub struct ApiLogEntry {
     pub level: String,
     pub message: String,
 }
+
+// ---------------------------------------------------------------------------
+// Environment inspector (read-only)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PythonRuntime {
+    /// Human label, e.g. `Windows` or `WSL: Ubuntu`.
+    pub label: String,
+    pub version: String,
+    pub path: String,
+    /// `"windows"` | `"wsl"`.
+    pub source: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WslDistroInfo {
+    pub name: String,
+    pub state: String,
+    pub version: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CudaInfo {
+    pub available: bool,
+    pub driver_version: String,
+    pub cuda_version: String,
+    pub gpu_name: String,
+    pub nvcc_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskInfo {
+    pub name: String,
+    pub used_gb: f32,
+    pub total_gb: f32,
+    pub free_gb: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EnvironmentReport {
+    pub pythons: Vec<PythonRuntime>,
+    pub wsl_distros: Vec<WslDistroInfo>,
+    pub git_version: String,
+    pub cuda: CudaInfo,
+    pub disks: Vec<DiskInfo>,
+    pub detected_at: i64,
+}

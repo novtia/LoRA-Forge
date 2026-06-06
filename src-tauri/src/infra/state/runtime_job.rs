@@ -23,3 +23,10 @@ pub struct RuntimeJob {
     pub control_mode: RuntimeJobControlMode,
     pub child: Arc<tokio::sync::Mutex<Child>>,
 }
+
+/// In-flight training-repo clone/pull task. Held so the UI can cancel it.
+#[derive(Clone)]
+pub struct RepoTask {
+    pub task_id: String,
+    pub child: Arc<tokio::sync::Mutex<Child>>,
+}

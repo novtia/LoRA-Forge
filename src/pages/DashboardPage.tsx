@@ -12,6 +12,7 @@ import {
   FolderOpen,
   Archive,
   Settings2,
+  Server,
   X,
 } from "lucide-react";
 import { ProjectGridCard } from "../components/dashboard/ProjectGridCard";
@@ -406,6 +407,12 @@ export default function DashboardPage() {
               <ArrowRight size={20} />
             </button>
           )}
+          <Link to="/design" state={{ from: "/", tab: "env" }} className="action-btn">
+            <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
+              <Server size={20} /> {t("dashboard.trainingEnv")}
+            </span>
+            <ArrowRight size={20} />
+          </Link>
           <Link to="/design" state={{ from: "/" }} className="action-btn">
             <span style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
               <Settings2 size={20} /> {t("dashboard.designLab")}

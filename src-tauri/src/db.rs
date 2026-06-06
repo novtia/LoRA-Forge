@@ -28,4 +28,5 @@ pub use crate::infra::db::repos::{
         load_diffusion_pipe_config, load_training_config, load_training_env,
         save_diffusion_pipe_config, save_training_config, save_training_env,
     },
+    training_repos::{delete_custom_repo, insert_custom_repo, list_custom_repos},
 };

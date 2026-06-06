@@ -9,3 +9,4 @@ pub mod jobs;
 pub mod llm;
 pub mod projects;
 pub mod training;
+pub mod training_repos;

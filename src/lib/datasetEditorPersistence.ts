@@ -2,6 +2,13 @@ const STORAGE_NS = "loraForge.datasetEditorForm.v1";
 
 export type DatasetEditorTriggerScope = "all" | "group" | "selection";
 
+/**
+ * 批量打标的执行方式：
+ * - `sequential` — 一张接一张排队打标（默认，保留上一张 caption 作为上下文）。
+ * - `parallel`   — 每张图各自独立并发打标，互不影响（速度快，无跨图上下文）。
+ */
+export type DatasetEditorBatchExecutionMode = "sequential" | "parallel";
+
 import type { CaptionTagMode } from "./types";
 
 export type DatasetEditorFormPersist = {
@@ -36,6 +43,8 @@ export type DatasetEditorFormPersist = {
   batchTaggingGroupPath: string;
   imageRange: string;
   taggingMode: "all" | "range";
+  /** Sequential (one-by-one) vs parallel (each image independent) batch execution. */
+  batchExecutionMode: DatasetEditorBatchExecutionMode;
   /** When true, batch tagging skips images that already have a non-empty caption. */
   onlyUntagged: boolean;
   /** Vertical preview tool dock next to image (legacy key `showBatchPanel`). */
@@ -58,6 +67,8 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
     >;
     if (typeof parsed !== "object" || parsed === null) return null;
     const taggingMode = parsed.taggingMode === "range" ? "range" : "all";
+    const batchExecutionMode: DatasetEditorBatchExecutionMode =
+      parsed.batchExecutionMode === "parallel" ? "parallel" : "sequential";
     const dockLegacy =
       typeof parsed.previewDockOpen === "boolean"
         ? parsed.previewDockOpen
@@ -102,6 +113,7 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
         typeof parsed.batchTaggingGroupPath === "string" ? parsed.batchTaggingGroupPath : "",
       imageRange: typeof parsed.imageRange === "string" ? parsed.imageRange : "",
       taggingMode,
+      batchExecutionMode,
       onlyUntagged: typeof parsed.onlyUntagged === "boolean" ? parsed.onlyUntagged : false,
       previewDockOpen: dockLegacy,
       lastImageRelativePath:

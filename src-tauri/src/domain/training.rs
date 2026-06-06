@@ -701,3 +701,71 @@ pub struct TrainingStateChangedEvent {
     pub job_id: String,
     pub status: JobStatus,
 }
+
+// ---------------------------------------------------------------------------
+// Training repository management
+// ---------------------------------------------------------------------------
+
+/// One row in the repo manager UI — merges the curated catalog with custom
+/// user-added repos, enriched with on-disk git status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainingRepoStatus {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// Where the repo lives: `"windows"` (native git) or `"wsl"` (`wsl bash -c git …`).
+    pub target: String,
+    pub git_url: String,
+    /// Display path: a Windows path for `windows`, or a WSL path for `wsl`.
+    pub install_path: String,
+    pub installed: bool,
+    pub current_branch: Option<String>,
+    pub current_commit: Option<String>,
+    pub is_custom: bool,
+}
+
+/// Payload for adding a user-defined repository.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomRepoInput {
+    pub name: String,
+    pub git_url: String,
+    pub target: String,
+    pub install_path: String,
+}
+
+/// Persisted custom-repo definition (stored as JSON in the `training_repos` table).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomRepoRecord {
+    pub id: String,
+    pub name: String,
+    pub git_url: String,
+    pub target: String,
+    pub install_path: String,
+    pub created_at: i64,
+}
+
+/// Streamed line from an in-flight clone/pull task.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoTaskLogEvent {
+    pub repo_id: String,
+    pub task_id: String,
+    pub line: String,
+    pub level: String,
+}
+
+/// Lifecycle transition for a repo task.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoTaskStateEvent {
+    pub repo_id: String,
+    pub task_id: String,
+    /// `"download"` | `"update"` | `"delete"`.
+    pub kind: String,
+    /// `"running"` | `"completed"` | `"failed"`.
+    pub status: String,
+    pub message: Option<String>,
+}

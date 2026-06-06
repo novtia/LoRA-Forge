@@ -25,12 +25,14 @@ use crate::{
 };
 
 pub use api_log::ApiLogStore;
-pub use runtime_job::{RuntimeJob, RuntimeJobControlMode};
+pub use runtime_job::{RepoTask, RuntimeJob, RuntimeJobControlMode};
 
 struct AppStateInner {
     paths: AppPaths,
     db: Mutex<Connection>,
     jobs: Mutex<HashMap<String, RuntimeJob>>,
+    /// In-flight training-repo clone/pull tasks, keyed by `task_id`.
+    repo_tasks: Mutex<HashMap<String, RepoTask>>,
     hardware_info: Mutex<HardwareInfo>,
     /// 每张图片各自独立的打标取消标志，按 `project_id\u{1f}relative_path` 作为 key。
     /// 这样不同图片的打标互不影响，单独取消只会终止对应那一张。
@@ -68,6 +70,7 @@ impl AppState {
                 },
                 db: Mutex::new(connection),
                 jobs: Mutex::new(HashMap::new()),
+                repo_tasks: Mutex::new(HashMap::new()),
                 hardware_info: Mutex::new(hardware_info),
                 llm_caption_cancels: Mutex::new(HashMap::new()),
                 api_logs: ApiLogStore::new(),
@@ -176,6 +179,34 @@ impl AppState {
             .lock()
             .map_err(|_| AppError::State("Runtime job registry is poisoned".to_string()))?;
         Ok(jobs.remove(project_id))
+    }
+
+    pub fn insert_repo_task(&self, task: RepoTask) -> AppResult<()> {
+        let mut tasks = self
+            .inner
+            .repo_tasks
+            .lock()
+            .map_err(|_| AppError::State("Repo task registry is poisoned".to_string()))?;
+        tasks.insert(task.task_id.clone(), task);
+        Ok(())
+    }
+
+    pub fn repo_task(&self, task_id: &str) -> AppResult<Option<RepoTask>> {
+        let tasks = self
+            .inner
+            .repo_tasks
+            .lock()
+            .map_err(|_| AppError::State("Repo task registry is poisoned".to_string()))?;
+        Ok(tasks.get(task_id).cloned())
+    }
+
+    pub fn remove_repo_task(&self, task_id: &str) -> AppResult<Option<RepoTask>> {
+        let mut tasks = self
+            .inner
+            .repo_tasks
+            .lock()
+            .map_err(|_| AppError::State("Repo task registry is poisoned".to_string()))?;
+        Ok(tasks.remove(task_id))
     }
 
     pub fn hardware_info(&self) -> AppResult<HardwareInfo> {

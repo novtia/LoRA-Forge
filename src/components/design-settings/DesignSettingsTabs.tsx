@@ -1,4 +1,4 @@
-import { Bot, Cpu, Monitor, Palette, Sparkles, type LucideIcon } from "lucide-react";
+import { Bot, Monitor, Palette, Server, Sparkles, type LucideIcon } from "lucide-react";
 import type { TranslateFn } from "../../lib/i18n";
 import type { DesignTab } from "./types";
 
@@ -30,9 +30,9 @@ export function DesignSettingsTabs({
       label: t("design.interfaceTuning"),
     },
     {
-      id: "training",
-      icon: Cpu,
-      label: t("design.trainingEnv"),
+      id: "env",
+      icon: Server,
+      label: t("env.title"),
     },
     {
       id: "llm",

@@ -33,6 +33,7 @@ pub async fn caption_image(
     current_caption: Option<&str>,
     previous_assistant_caption: Option<&str>,
     previous_image_relative_path: Option<&str>,
+    control_relative_path: Option<&str>,
     cancel: Arc<AtomicBool>,
 ) -> AppResult<String> {
     let (project, settings) = state.with_db(|connection| {
@@ -44,6 +45,25 @@ pub async fn caption_image(
 
     let dataset_root = PathBuf::from(project.dataset_path);
     let image_path = resolve_dataset_path(&dataset_root, relative_path)?;
+
+    // 编辑打标分支：传入参考图(control)路径且存在时，走双图「编辑指令」打标。
+    if let Some(control_rel) = control_relative_path
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        let control_path = resolve_dataset_path(&dataset_root, control_rel)?;
+        if control_path.is_file() {
+            return llm::caption_edit_instruction(
+                &settings,
+                &control_path,
+                &image_path,
+                user_message,
+                &cancel,
+                Some(state.clone()),
+            )
+            .await;
+        }
+    }
 
     // 仅在能成功解析出之前图的路径、且存在时才传给 LLM 层；
     // 否则传 None（防止错误数据导致 IO 错误打断主流程）。

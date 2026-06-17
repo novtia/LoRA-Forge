@@ -166,6 +166,7 @@ pub async fn auto_tag_image(
     current_caption: Option<String>,
     previous_assistant_caption: Option<String>,
     previous_image_relative_path: Option<String>,
+    control_relative_path: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
     let app_state = state.inner().clone();
@@ -181,6 +182,7 @@ pub async fn auto_tag_image(
         current_caption.as_deref(),
         previous_assistant_caption.as_deref(),
         previous_image_relative_path.as_deref(),
+        control_relative_path.as_deref(),
         cancel,
     )
     .await;

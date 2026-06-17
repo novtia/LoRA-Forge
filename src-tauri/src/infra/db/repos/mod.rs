@@ -4,6 +4,7 @@
  */
 
 pub mod baidu;
+pub mod dataset_control_dirs;
 pub mod dataset_groups;
 pub mod jobs;
 pub mod llm;

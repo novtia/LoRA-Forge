@@ -18,6 +18,7 @@ import {
   getDatasetAsset,
   getRecentApiLogs,
   groupDatasetImages,
+  importDatasetImages,
   listUntaggedImagePaths,
   moveDatasetImages,
   readCaption,
@@ -33,6 +34,7 @@ import {
   loadDatasetEditorFormPersist,
   saveDatasetEditorFormPersist,
   type DatasetEditorBatchExecutionMode,
+  type DatasetEditorMode,
   type DatasetEditorTriggerScope,
 } from "../../lib/datasetEditorPersistence";
 import { contiguousTagRangeForSelection, splitCaptionTags, charRangeForContiguousTagIndices } from "../../lib/captionSegments";
@@ -44,6 +46,7 @@ import { DatasetContextMenu } from "./dataset-editor/DatasetContextMenu";
 import { DatasetEditorCaptionsCard } from "./dataset-editor/DatasetEditorCaptionsCard";
 import { DatasetEditorPreviewCard } from "./dataset-editor/DatasetEditorPreviewCard";
 import { DatasetEditorSidebar } from "./dataset-editor/DatasetEditorSidebar";
+import { EditPairManagerPanel } from "./dataset-editor/EditPairManagerPanel";
 import { DatasetPromptDialog } from "./dataset-editor/DatasetPromptDialog";
 import {
   buildCaptionWithTriggerAt,
@@ -56,6 +59,7 @@ import {
 import type { BatchProgress } from "./dataset-editor/datasetEditorTypes";
 import { pullDatasetSidebarEntries, withDatasetSidebarRefresh } from "./dataset-editor/datasetSidebarSync";
 import { resolveScopedImagePaths } from "./dataset-editor/datasetImageScope";
+import { fileToImportPayload } from "./dataset-editor/fileUpload";
 import {
   buildDatasetTree,
   collectAllDirectoryPaths,
@@ -76,6 +80,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
   const [selectedImageIndex, setSelectedImageIndex] = useState(-1);
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [datasetMode, setDatasetMode] = useState<DatasetEditorMode>("normal");
   /**
    * 正在进行单图打标的图片相对路径集合。每张图各自独立打标、互不影响，
    * 因此用集合而非单一的 `busy` 锁，允许选中一张图打标后立即切到另一张继续打标。
@@ -207,6 +212,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
 
   useEffect(() => {
     const saved = loadDatasetEditorFormPersist(projectId);
+    setDatasetMode(saved?.datasetMode === "edit" ? "edit" : "normal");
     setLlmDirectTagHint(saved?.llmDirectTagHint ?? "");
     setLlmConversationHint(saved?.llmConversationHint ?? "");
     setLlmTagMode(saved?.llmTagMode === "conversationModify" ? "conversationModify" : "direct");
@@ -253,6 +259,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         ? imgs[selectedImageIndex]!.relativePath
         : loadDatasetEditorFormPersist(projectId)?.lastImageRelativePath ?? "";
     saveDatasetEditorFormPersist(projectId, {
+      datasetMode,
       llmDirectTagHint,
       llmConversationHint,
       llmTagMode,
@@ -274,6 +281,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
     projectId,
     entries,
     selectedImageIndex,
+    datasetMode,
     llmDirectTagHint,
     llmConversationHint,
     llmTagMode,
@@ -829,6 +837,39 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
       await performMoveImagesToTarget(paths, "");
     },
     [performMoveImagesToTarget],
+  );
+
+  const performImportImages = useCallback(
+    async (files: File[], targetRelativePath: string) => {
+      if (files.length === 0 || busy !== null) return;
+      const normalizedTarget = targetRelativePath.replace(/^\/+|\/+$/g, "");
+      setBusy("import");
+      setError(null);
+      try {
+        const payloads = await Promise.all(files.map((file) => fileToImportPayload(file)));
+        const { fresh } = await withDatasetSidebarRefresh(projectId, () =>
+          importDatasetImages(projectId, normalizedTarget, payloads),
+        );
+        if (normalizedTarget) {
+          setExpandedDirs((prev) => {
+            const next = new Set(prev);
+            next.add(normalizedTarget);
+            let cursor = parentRelativePath(normalizedTarget);
+            while (cursor) {
+              next.add(cursor);
+              cursor = parentRelativePath(cursor);
+            }
+            return next;
+          });
+        }
+        await reloadEntriesPreserveSelection(fresh, asset?.relativePath ?? null);
+      } catch (e) {
+        setError(t("dataset.uploadFailed", { error: getErrorMessage(e, "") }));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [asset?.relativePath, busy, projectId, reloadEntriesPreserveSelection, t],
   );
 
   const performRemoveGroup = useCallback(
@@ -1867,6 +1908,9 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         onMoveImagesToFolder={(paths, targetRelativePath) => {
           void performMoveImagesToTarget(paths, targetRelativePath);
         }}
+        onImportImages={(files, targetRelativePath) => {
+          void performImportImages(files, targetRelativePath);
+        }}
         onImageRowClick={handleImageRowClick}
         onImageRowContextMenu={(ev, relativePath) => {
           if (!selectedImagePaths.has(relativePath)) {
@@ -1905,7 +1949,24 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         }}
       />
 
+      {datasetMode === "edit" ? (
+        <EditPairManagerPanel
+          projectId={projectId}
+          entries={entries}
+          busy={busy}
+          setBusy={setBusy}
+          onError={setError}
+          onEntriesRefreshed={(fresh) =>
+            reloadEntriesPreserveSelection(fresh, asset?.relativePath ?? null)
+          }
+          llmDirectTagHint={llmDirectTagHint}
+          datasetMode={datasetMode}
+          setDatasetMode={setDatasetMode}
+        />
+      ) : (
       <DatasetEditorPreviewCard
+        datasetMode={datasetMode}
+        setDatasetMode={setDatasetMode}
         asset={asset}
         imageEntriesLength={imageEntries.length}
         batchTaggingTargetCount={batchTaggingTargetEntries.length}
@@ -1969,6 +2030,7 @@ export default function DatasetEditor({ projectId, initialImagePath }: DatasetEd
         fileRenameBusy={busy === "file-rename"}
         fileExtensionBusy={busy === "file-ext"}
       />
+      )}
 
       <DatasetEditorCaptionsCard
         asset={asset}

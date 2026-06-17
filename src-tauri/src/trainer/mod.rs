@@ -104,6 +104,14 @@ fn open_project_log_file(root_path: &str, job_id: &str) -> SharedLogFile {
     })
 }
 
+/// Quote a value for safe embedding in a bash `-c` script (single-quoted).
+pub(super) fn bash_shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 /// Shell-like single line for logs (quote args that contain whitespace).
 fn format_training_invocation(cmd: &tokio::process::Command) -> String {
     fn fmt_arg(arg: &OsStr) -> String {
@@ -134,7 +142,10 @@ fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Comma
 }
 
 fn training_subprocess_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::process::Command {
-    tokio::process::Command::new(program)
+    let mut cmd = tokio::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    cmd
 }
 
 
@@ -529,4 +540,28 @@ fn job_has_structured_logs(state: &AppState, job_id: &str) -> AppResult<bool> {
             .map(|value| value.is_some())
             .map_err(Into::into)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bash_shell_quote;
+
+    #[test]
+    fn bash_shell_quote_preserves_spaces() {
+        let path = "/mnt/d/ComfyUI windows portable/train/gufeng/output/20260606_18-58-23";
+        assert_eq!(
+            bash_shell_quote(path),
+            "'/mnt/d/ComfyUI windows portable/train/gufeng/output/20260606_18-58-23'"
+        );
+    }
+
+    #[test]
+    fn bash_shell_quote_escapes_single_quotes() {
+        assert_eq!(bash_shell_quote("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn bash_shell_quote_empty() {
+        assert_eq!(bash_shell_quote(""), "''");
+    }
 }

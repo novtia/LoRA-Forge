@@ -20,6 +20,44 @@ You MUST apply changes ONLY by calling the provided tools (add_tags, remove_tags
 Do not output markdown or explanations in the final message. After tool calls the system returns the updated caption. \
 When the caption matches the user's intent, stop calling tools — do not send a summary or confirmation text.";
 
+pub(crate) const EDIT_INSTRUCTION_SYSTEM_PROMPT: &str = "You write concise image-editing instructions for training an image-EDIT model (e.g. Flux Kontext / Flux.2 Klein edit). \
+You are shown TWO images: the FIRST is the REFERENCE (before / source) image, the SECOND is the TARGET (after / edited) image. \
+Output a single short imperative instruction that, applied to the reference image, would produce the target image. \
+Describe ONLY what changed (subject, attributes, colors, style, added/removed elements, background, pose, lighting) — do not describe what stayed the same. \
+Return one plain sentence with no preamble, no markdown, no quotes, and no explanation.";
+
+pub(crate) const EDIT_INSTRUCTION_PROMPT: &str = "The first image is the reference (before) image and the second image is the target (after) image. Write one concise imperative edit instruction that transforms the reference into the target. Mention only the differences. Return only the instruction sentence.";
+
+/// 编辑指令模式：基础指令 + 可选用户备注，输入为「改前图 + 改后图」。
+pub(crate) fn compose_edit_instruction_user_prompt(user_message: Option<&str>) -> String {
+    match user_message.map(str::trim).filter(|s| !s.is_empty()) {
+        None => EDIT_INSTRUCTION_PROMPT.to_string(),
+        Some(extra) => format!(
+            "{}\n\nAdditional notes from the user (treat as authoritative):\n{}",
+            EDIT_INSTRUCTION_PROMPT, extra
+        ),
+    }
+}
+
+/// 构造带两张图（改前 + 改后）的 user content；不支持视觉时降级为纯文本。
+pub(crate) fn build_edit_user_message_content(
+    text: &str,
+    reference_image_url: &str,
+    target_image_url: &str,
+    supports_vision: bool,
+) -> Value {
+    if supports_vision && !reference_image_url.is_empty() && !target_image_url.is_empty() {
+        return json!([
+            {"type": "text", "text": text},
+            {"type": "text", "text": "Reference (before) image:"},
+            {"type": "image_url", "image_url": {"url": reference_image_url}},
+            {"type": "text", "text": "Target (after) image:"},
+            {"type": "image_url", "image_url": {"url": target_image_url}},
+        ]);
+    }
+    json!(text)
+}
+
 /// Keeps multimodal payloads small; omit prior turn if exceeding this character count after trim.
 pub(crate) const MAX_PREVIOUS_ASSISTANT_CHARS: usize = 12_000;
 

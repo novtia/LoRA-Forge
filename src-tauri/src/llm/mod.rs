@@ -47,9 +47,10 @@ use http::{
     print_llm_network_error_to_stderr, response_excerpt, sanitize_caption, shared_llm_chat_client,
 };
 use prompt::{
-    build_user_message_content, compose_auto_tag_user_prompt, compose_modify_user_prompt,
-    effective_system_prompt, format_llm_request_for_api_log, truncate_previous_assistant_caption,
-    MODIFY_CAPTION_SYSTEM_PROMPT,
+    build_edit_user_message_content, build_user_message_content, compose_auto_tag_user_prompt,
+    compose_edit_instruction_user_prompt, compose_modify_user_prompt, effective_system_prompt,
+    format_llm_request_for_api_log, truncate_previous_assistant_caption,
+    EDIT_INSTRUCTION_SYSTEM_PROMPT, MODIFY_CAPTION_SYSTEM_PROMPT,
 };
 
 const MAX_CAPTION_TOOL_ROUNDS: usize = 8;
@@ -254,6 +255,182 @@ pub async fn generate_dataset_caption(
             total_attempts
         ))
     }))
+}
+
+/// 编辑指令模式（双图）：输入「参考图(改前) + 目标图(改后)」，输出一句编辑指令 caption。
+pub async fn caption_edit_instruction(
+    settings: &LlmSettings,
+    reference_image_path: &Path,
+    target_image_path: &Path,
+    user_message: Option<&str>,
+    cancel: &Arc<AtomicBool>,
+    log_sink: Option<AppState>,
+) -> AppResult<String> {
+    settings.validate().map_err(AppError::Validation)?;
+
+    let display_image = target_image_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("image")
+        .to_string();
+
+    let reference_bytes = fs::read(reference_image_path)?;
+    let target_bytes = fs::read(target_image_path)?;
+    let image_byte_count = reference_bytes.len() + target_bytes.len();
+    let mime = mime_type_for_image(target_image_path);
+    let reference_url = format!(
+        "data:{};base64,{}",
+        mime_type_for_image(reference_image_path),
+        STANDARD.encode(&reference_bytes)
+    );
+    let target_url = format!("data:{};base64,{}", mime, STANDARD.encode(&target_bytes));
+    drop(reference_bytes);
+    drop(target_bytes);
+
+    let max_extra_attempts = settings.caption_retry_max;
+    let mut last_err: Option<AppError> = None;
+    let mut include_image = settings.should_include_image();
+    let model_id = settings.model_id.clone();
+
+    for attempt in 0..=max_extra_attempts {
+        if cancel.load(Ordering::SeqCst) {
+            return Err(AppError::Cancelled);
+        }
+        if attempt > 0 {
+            let base: u64 = 600u64.saturating_mul(1u64 << (attempt - 1).min(6));
+            let sleep_ms = base.saturating_add(pseudo_jitter_ms()).min(8000);
+            if let (Some(ref st), Some(prev)) = (log_sink.as_ref(), last_err.as_ref()) {
+                st.push_api_log(
+                    "llm",
+                    "warn",
+                    format!(
+                        "重试 edit caption {}/{} · {} · 等待 {}ms",
+                        attempt, max_extra_attempts, prev, sleep_ms
+                    ),
+                );
+            }
+            sleep(Duration::from_millis(sleep_ms)).await;
+        }
+        if cancel.load(Ordering::SeqCst) {
+            return Err(AppError::Cancelled);
+        }
+        match run_with_image_fallback(&mut include_image, &model_id, &log_sink, |with_image| {
+            caption_edit_instruction_once(
+                settings,
+                &reference_url,
+                &target_url,
+                image_byte_count,
+                mime,
+                user_message,
+                with_image,
+                cancel,
+                display_image.clone(),
+                log_sink.clone(),
+            )
+        })
+        .await
+        {
+            Ok(caption) => return Ok(caption),
+            Err(err) => {
+                if !err.is_retryable() {
+                    return Err(err);
+                }
+                last_err = Some(err);
+            }
+        }
+    }
+
+    Err(last_err
+        .unwrap_or_else(|| AppError::Process("LLM edit caption failed after retries".to_string())))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn caption_edit_instruction_once(
+    settings: &LlmSettings,
+    reference_image_url: &str,
+    target_image_url: &str,
+    image_byte_count: usize,
+    mime: &'static str,
+    user_message: Option<&str>,
+    include_image: bool,
+    cancel: &Arc<AtomicBool>,
+    display_image: String,
+    log_sink: Option<AppState>,
+) -> AppResult<String> {
+    if cancel.load(Ordering::SeqCst) {
+        return Err(AppError::Cancelled);
+    }
+
+    let endpoint = normalize_chat_completions_url(&settings.endpoint_url)?;
+    let kind = profile::classify_endpoint(settings);
+    let is_thinking = profile::is_thinking_model(&settings.model_id);
+    let model_id = settings.model_id.clone();
+    let api_key = settings.api_key.trim().to_string();
+
+    let user_prompt = compose_edit_instruction_user_prompt(user_message);
+    let messages: Vec<Value> = vec![
+        json!({ "role": "system", "content": EDIT_INSTRUCTION_SYSTEM_PROMPT }),
+        json!({
+            "role": "user",
+            "content": build_edit_user_message_content(
+                &user_prompt,
+                reference_image_url,
+                target_image_url,
+                include_image,
+            ),
+        }),
+    ];
+
+    let request_body = build_request_body(&model_id, &messages, settings, kind, is_thinking);
+    if let Some(ref st) = log_sink {
+        st.push_api_log(
+            "llm",
+            "info",
+            format!(
+                "请求 edit caption · {} · model={} · with_image={} · {}",
+                display_image,
+                model_id,
+                include_image,
+                endpoint.trim()
+            ),
+        );
+        st.push_api_log(
+            "llm",
+            "info",
+            format_llm_request_for_api_log(&request_body, kind, image_byte_count, mime, is_thinking),
+        );
+    }
+
+    let payload =
+        post_chat_completions(&endpoint, &request_body, &api_key, kind, cancel, log_sink.as_ref())
+            .await?;
+
+    if let Some(refusal) = payload
+        .pointer("/choices/0/message/refusal")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Err(AppError::ContentFiltered(format!(
+            "LLM refused to generate an edit instruction: {refusal}"
+        )));
+    }
+    if let Some(reason) = blocking_finish_reason(&payload) {
+        return Err(AppError::ContentFiltered(format!(
+            "LLM response was blocked by the provider's content filter ({reason})."
+        )));
+    }
+
+    match extract_user_visible_caption(&payload)
+        .as_deref()
+        .map(sanitize_caption)
+        .filter(|s| !s.is_empty())
+    {
+        Some(caption) => Ok(caption),
+        None => Err(AppError::ContentFiltered(
+            "LLM response did not contain a visible edit instruction.".to_string(),
+        )),
+    }
 }
 
 /// 对话修改模式：用户指令 + 现有 caption，LLM 通过内部工具修改。

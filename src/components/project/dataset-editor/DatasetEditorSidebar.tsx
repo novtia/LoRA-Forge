@@ -1,4 +1,8 @@
-import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from "react";
+import type {
+  ChangeEvent as ReactChangeEvent,
+  DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
+} from "react";
 import { useRef, useState } from "react";
 import {
   ChevronDown,
@@ -8,6 +12,7 @@ import {
   FolderPlus,
   FolderTree,
   Image,
+  Upload,
 } from "lucide-react";
 import { useI18n } from "../../../lib/i18n";
 import type { DatasetEntry } from "../../../lib/types";
@@ -16,6 +21,17 @@ import { parentRelativePath } from "./datasetTree";
 import type { BatchProgress } from "./datasetEditorTypes";
 
 const DATASET_IMAGE_DRAG_TYPE = "application/x-dataset-editor-image-paths";
+
+/** True when the OS is dragging real files (vs. an internal image-row drag). */
+function isExternalFileDrag(dataTransfer: DataTransfer): boolean {
+  return Array.from(dataTransfer.types ?? []).includes("Files");
+}
+
+function imageFilesFromDrop(dataTransfer: DataTransfer): File[] {
+  return Array.from(dataTransfer.files ?? []).filter(
+    (file) => file.type.startsWith("image/") || /\.(png|jpe?g|webp|bmp)$/i.test(file.name),
+  );
+}
 
 function parseDatasetImageDragPaths(dataTransfer: DataTransfer): string[] | null {
   const raw = dataTransfer.getData(DATASET_IMAGE_DRAG_TYPE) || dataTransfer.getData("text/plain");
@@ -59,6 +75,8 @@ type Props = {
   onCollapseAll: () => void;
   onToggleDirectory: (path: string) => void;
   onMoveImagesToFolder: (paths: string[], targetRelativePath: string) => void;
+  /** Upload OS image files into a dataset folder ("" = dataset root). */
+  onImportImages: (files: File[], targetRelativePath: string) => void;
   onImageRowClick: (relativePath: string, ev: ReactMouseEvent) => void;
   onImageRowContextMenu: (ev: ReactMouseEvent, relativePath: string) => void;
   onDirectoryRowContextMenu: (ev: ReactMouseEvent, relativePath: string) => void;
@@ -81,6 +99,7 @@ export function DatasetEditorSidebar({
   onCollapseAll,
   onToggleDirectory,
   onMoveImagesToFolder,
+  onImportImages,
   onImageRowClick,
   onImageRowContextMenu,
   onDirectoryRowContextMenu,
@@ -91,8 +110,19 @@ export function DatasetEditorSidebar({
   const canDragFromSidebar = busy === null;
   /** WebView2/Chromium needs dropEffect set on dragover; track our drag so gaps & image rows stay "move". */
   const internalImageDragActiveRef = useRef(false);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleUploadInputChange = (ev: ReactChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(ev.target.files ?? []);
+    ev.target.value = "";
+    if (files.length > 0) onImportImages(files, "");
+  };
 
   const applySidebarDragDropEffect = (ev: ReactDragEvent) => {
+    if (isExternalFileDrag(ev.dataTransfer)) {
+      ev.dataTransfer.dropEffect = busy === null ? "copy" : "none";
+      return;
+    }
     const allow =
       canDragFromSidebar &&
       internalImageDragActiveRef.current &&
@@ -178,6 +208,26 @@ export function DatasetEditorSidebar({
         >
           <ChevronRight size={13} aria-hidden />
         </button>
+        <button
+          type="button"
+          className="btn"
+          style={{ padding: "0.2rem 0.45rem", fontSize: "0.72rem", marginLeft: "auto" }}
+          title={t("dataset.uploadImages")}
+          aria-label={t("dataset.uploadImages")}
+          disabled={busy !== null}
+          onClick={() => uploadInputRef.current?.click()}
+        >
+          <Upload size={13} aria-hidden style={{ marginRight: "0.3rem" }} />
+          {t("dataset.uploadImages")}
+        </button>
+        <input
+          ref={uploadInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/bmp"
+          multiple
+          style={{ display: "none" }}
+          onChange={handleUploadInputChange}
+        />
       </div>
 
       <div
@@ -196,6 +246,13 @@ export function DatasetEditorSidebar({
           const next = ev.relatedTarget;
           if (next instanceof Node && ev.currentTarget.contains(next)) return;
           setDropHighlight(null);
+        }}
+        onDrop={(ev) => {
+          if (!isExternalFileDrag(ev.dataTransfer)) return;
+          ev.preventDefault();
+          setDropHighlight(null);
+          const files = imageFilesFromDrop(ev.dataTransfer);
+          if (files.length > 0 && busy === null) onImportImages(files, "");
         }}
         style={{
           flex: 1,
@@ -216,6 +273,11 @@ export function DatasetEditorSidebar({
           onDragOver={(ev) => {
             ev.preventDefault();
             ev.stopPropagation();
+            if (isExternalFileDrag(ev.dataTransfer)) {
+              ev.dataTransfer.dropEffect = busy === null ? "copy" : "none";
+              if (busy === null) setDropHighlight({ kind: "root" });
+              return;
+            }
             if (imageEntries.length === 0 || !canDragFromSidebar) {
               ev.dataTransfer.dropEffect = "none";
               return;
@@ -232,6 +294,11 @@ export function DatasetEditorSidebar({
             ev.preventDefault();
             ev.stopPropagation();
             setDropHighlight(null);
+            if (isExternalFileDrag(ev.dataTransfer)) {
+              const files = imageFilesFromDrop(ev.dataTransfer);
+              if (files.length > 0 && busy === null) onImportImages(files, "");
+              return;
+            }
             const paths = parseDatasetImageDragPaths(ev.dataTransfer);
             if (!paths || !dragPathsWouldChangeParent(paths, "")) return;
             onMoveImagesToFolder(paths, "");
@@ -273,6 +340,12 @@ export function DatasetEditorSidebar({
                 onDragOver={(ev) => {
                   ev.preventDefault();
                   ev.stopPropagation();
+                  if (isExternalFileDrag(ev.dataTransfer)) {
+                    ev.dataTransfer.dropEffect = busy === null ? "copy" : "none";
+                    if (busy === null)
+                      setDropHighlight({ kind: "directory", path: node.relativePath });
+                    return;
+                  }
                   if (!canDragFromSidebar) {
                     ev.dataTransfer.dropEffect = "none";
                     return;
@@ -294,6 +367,12 @@ export function DatasetEditorSidebar({
                   ev.preventDefault();
                   ev.stopPropagation();
                   setDropHighlight(null);
+                  if (isExternalFileDrag(ev.dataTransfer)) {
+                    const files = imageFilesFromDrop(ev.dataTransfer);
+                    if (files.length > 0 && busy === null)
+                      onImportImages(files, node.relativePath);
+                    return;
+                  }
                   const paths = parseDatasetImageDragPaths(ev.dataTransfer);
                   if (!paths || !dragPathsWouldChangeParent(paths, node.relativePath)) return;
                   onMoveImagesToFolder(paths, node.relativePath);

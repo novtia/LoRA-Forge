@@ -50,6 +50,7 @@ import {
 } from "../lib/desktopApi";
 import FileAssetImage from "../components/FileAssetImage";
 import { formatTimer } from "../lib/formatters";
+import { getPreferredTrainingMode } from "../lib/trainingModePreference";
 import { useI18n, type TranslateFn } from "../lib/i18n";
 import { appendTrainingLog, dedupeTrainingLogs, normalizeActiveJobLogs } from "../lib/trainingLogs";
 import type {
@@ -411,6 +412,9 @@ export default function ProjectDetailPage() {
     setConfig(configData);
     setDraftConfig(configData);
     if (dpCfg) { setDpConfig(dpCfg); setDraftDpConfig(dpCfg); }
+    if (getPreferredTrainingMode(projectId) === "diffusion-pipe") {
+      setTrainingMode("diffusion-pipe");
+    }
     setJob(normalizeActiveJobLogs(jobData));
     setDatasetEntries(datasetData);
     setLatestCheckpointPath(typeof latestCkpt === "string" && latestCkpt.length > 0 ? latestCkpt : null);

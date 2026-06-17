@@ -9,9 +9,14 @@ export type DatasetEditorTriggerScope = "all" | "group" | "selection";
  */
 export type DatasetEditorBatchExecutionMode = "sequential" | "parallel";
 
+/** Tagging workspace mode: standard single-image tagging vs. edit-model pair tagging. */
+export type DatasetEditorMode = "normal" | "edit";
+
 import type { CaptionTagMode } from "./types";
 
 export type DatasetEditorFormPersist = {
+  /** Active tagging workspace mode. */
+  datasetMode: DatasetEditorMode;
   /** Optional notes sent with direct (auto) tagging. */
   llmDirectTagHint: string;
   /** Edit instruction for conversation modify mode. */
@@ -84,6 +89,7 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
     const tagModeRaw = parsed.llmTagMode;
     const llmTagMode =
       tagModeRaw === "conversationModify" ? "conversationModify" : "direct";
+    const datasetMode: DatasetEditorMode = parsed.datasetMode === "edit" ? "edit" : "normal";
     const legacyHint =
       typeof parsed.llmUserHint === "string" ? parsed.llmUserHint : "";
     const llmDirectTagHint =
@@ -99,6 +105,7 @@ export function loadDatasetEditorFormPersist(projectId: string): DatasetEditorFo
           ? legacyHint
           : "";
     return {
+      datasetMode,
       llmDirectTagHint,
       llmConversationHint,
       llmTagMode,

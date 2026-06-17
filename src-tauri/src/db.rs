@@ -10,6 +10,9 @@ pub use crate::infra::db::{initialize_database, recover_unfinished_jobs};
 #[allow(unused_imports)]
 pub use crate::infra::db::repos::{
     baidu::{load_baidu_translate_settings, save_baidu_translate_settings},
+    dataset_control_dirs::{
+        load_dataset_control_dirs, remove_dataset_control_dir, save_dataset_control_dir,
+    },
     dataset_groups::{
         load_dataset_group_types, remove_dataset_group_configs, rename_dataset_group_config,
         save_dataset_group_type,

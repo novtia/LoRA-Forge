@@ -12,8 +12,10 @@ import {
 } from "lucide-react";
 import type {
   DatasetEditorBatchExecutionMode,
+  DatasetEditorMode,
   DatasetEditorTriggerScope,
 } from "../../../lib/datasetEditorPersistence";
+import { DatasetModeToggle } from "./DatasetModeToggle";
 import type { ApiLogEntry, CaptionTagMode, DatasetAsset, DatasetEntry } from "../../../lib/types";
 import { useI18n } from "../../../lib/i18n";
 import FileAssetImage from "../../FileAssetImage";
@@ -28,6 +30,8 @@ import type { TriggerScopeFolderOption } from "./TriggerPositionPicker";
 import { API_LOG_DRAWER_W, BATCH_FLYOUT_W, FILE_TOOLS_FLYOUT_W, PREVIEW_DOCK_PX } from "./layoutConstants";
 
 type Props = {
+  datasetMode: DatasetEditorMode;
+  setDatasetMode: (mode: DatasetEditorMode) => void;
   asset: DatasetAsset | null;
   imageEntriesLength: number;
   batchTaggingTargetCount: number;
@@ -91,6 +95,8 @@ type Props = {
 };
 
 export function DatasetEditorPreviewCard({
+  datasetMode,
+  setDatasetMode,
   asset,
   imageEntriesLength,
   batchTaggingTargetCount,
@@ -164,10 +170,11 @@ export function DatasetEditorPreviewCard({
         animationDelay: "0.04s",
       }}
     >
-      <div className="card-header">
+      <div className="card-header" style={{ flexWrap: "wrap", gap: "0.4rem" }}>
         <span className="card-title-icon">
           <Eye size={18} /> {t("dataset.imagePreview")}
         </span>
+        <DatasetModeToggle mode={datasetMode} onChange={setDatasetMode} disabled={busy !== null} />
         <span>
           {asset
             ? selectedImageIndex >= 0

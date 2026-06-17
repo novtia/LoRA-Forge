@@ -2,6 +2,7 @@
 pub mod browse;
 pub mod caption;
 pub mod group;
+pub mod import;
 
 
 use std::{
@@ -12,7 +13,7 @@ use std::{
 use std::collections::HashMap;
 
 use crate::{
-    error::AppResult,
+    error::{AppError, AppResult},
     models::{
         DatasetEntry, DatasetEntryKind,
         DatasetGroupType,
@@ -198,6 +199,48 @@ pub(super) fn visit_images(current: &Path, images: &mut Vec<PathBuf>) -> AppResu
 pub(super) fn resolve_dataset_path(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
     let target = root.join(relative_path.replace('/', std::path::MAIN_SEPARATOR_STR));
     ensure_within(root, &target)
+}
+
+/// Joins a dataset-relative directory/file path under `root` without requiring the
+/// target to already exist (unlike [`resolve_dataset_path`], which canonicalizes via
+/// [`ensure_within`] and fails with IO error 2 on missing paths).
+pub(super) fn join_dataset_relative(root: &Path, relative_path: &str) -> AppResult<PathBuf> {
+    let trimmed = relative_path.trim().trim_matches('/');
+    if trimmed.is_empty() || trimmed == "." {
+        return Ok(root.to_path_buf());
+    }
+    for segment in trimmed.split('/') {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." {
+            return Err(AppError::Validation(
+                "Dataset path must not contain '..'.".to_string(),
+            ));
+        }
+        if segment.contains('\\') {
+            return Err(AppError::Validation(format!(
+                "Invalid dataset path segment '{segment}'."
+            )));
+        }
+    }
+    Ok(root.join(trimmed.replace('/', std::path::MAIN_SEPARATOR_STR)))
+}
+
+/// Returns a forward-slash dataset-relative path after the file has been written.
+pub(super) fn relative_path_from_dataset_root(
+    dataset_root: &Path,
+    absolute: &Path,
+) -> AppResult<String> {
+    let canon_root = fs::canonicalize(dataset_root)?;
+    let canon_abs = fs::canonicalize(absolute)?;
+    Ok(normalize_relative_path(canon_abs.strip_prefix(&canon_root).map_err(|_| {
+        AppError::Validation(format!(
+            "Path '{}' is outside dataset root '{}'.",
+            absolute.display(),
+            dataset_root.display()
+        ))
+    })?))
 }
 
 pub(super) fn caption_path_for_image(path: &Path) -> PathBuf {

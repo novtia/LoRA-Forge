@@ -82,6 +82,13 @@ pub fn initialize_database(connection: &Connection) -> AppResult<()> {
             PRIMARY KEY (project_id, group_path)
         );
 
+        CREATE TABLE IF NOT EXISTS dataset_control_dirs (
+            project_id TEXT NOT NULL,
+            target_path TEXT NOT NULL,
+            control_path TEXT NOT NULL,
+            PRIMARY KEY (project_id, target_path)
+        );
+
         CREATE TABLE IF NOT EXISTS jobs (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,

@@ -23,8 +23,8 @@ use crate::{
 };
 
 use super::{
-    emit_state_change, finalize_job, final_status_after_exit, format_training_invocation,
-    open_project_log_file, stream_logs, wait_for_child,
+    bash_shell_quote, emit_state_change, finalize_job, final_status_after_exit,
+    format_training_invocation, open_project_log_file, stream_logs, wait_for_child,
 };
 use super::sd_scripts::{collect_dataset_image_dirs, toml_string};
 // diffusion-pipe WSL training support
@@ -67,6 +67,7 @@ fn write_diffusion_pipe_dataset_toml(
     config: &DiffusionPipeConfig,
     destination: &std::path::Path,
     group_types: &std::collections::HashMap<String, String>,
+    control_dirs: &std::collections::HashMap<String, String>,
 ) -> AppResult<()> {
     let dataset_wsl = windows_path_to_wsl(&project.dataset_path);
     let resolutions = config.dataset_resolutions.trim();
@@ -107,15 +108,31 @@ fn write_diffusion_pipe_dataset_toml(
         vec![dataset_win.to_path_buf()]
     });
 
-    // Filter out regularization directories — diffusion-pipe has no is_reg concept.
+    // Helper: dataset-root-relative, forward-slash path for a directory.
+    let rel_of = |dir: &std::path::Path| -> String {
+        dir.strip_prefix(dataset_win)
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default()
+            .trim_matches('/')
+            .to_string()
+    };
+
+    // Directories registered as control (reference) targets are emitted via the
+    // matching target's `control_path`, so they must not appear as standalone
+    // `[[directory]]` blocks of their own.
+    let control_rel_set: std::collections::HashSet<String> =
+        control_dirs.values().map(|v| v.trim_matches('/').to_string()).collect();
+
+    // Filter out regularization directories (diffusion-pipe has no is_reg concept)
+    // and any directory that is itself a control/reference directory.
     let training_dirs: Vec<&PathBuf> = image_dirs
         .iter()
         .filter(|dir| {
-            let rel = dir
-                .strip_prefix(dataset_win)
-                .map(|p| p.to_string_lossy().replace('\\', "/"))
-                .unwrap_or_default();
-            !group_types.get(&rel).map(|t| t == "reg").unwrap_or(false)
+            let rel = rel_of(dir);
+            if group_types.get(&rel).map(|t| t == "reg").unwrap_or(false) {
+                return false;
+            }
+            !control_rel_set.contains(&rel)
         })
         .collect();
 
@@ -128,10 +145,18 @@ fn write_diffusion_pipe_dataset_toml(
     } else {
         for dir in &training_dirs {
             let dir_wsl = windows_path_to_wsl(&dir.to_string_lossy());
+            let rel = rel_of(dir);
             toml.push('\n');
             toml.push_str("[[directory]]\n");
             toml.push_str(&format!("path = {}\n", toml_string(&dir_wsl)));
             toml.push_str(&format!("num_repeats = {}\n", config.num_repeats));
+            // Edit training: if this target dir has a registered control directory,
+            // emit `control_path` so diffusion-pipe pairs same-stem reference images.
+            if let Some(control_rel) = control_dirs.get(&rel) {
+                let control_win = dataset_win.join(control_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                let control_wsl = windows_path_to_wsl(&control_win.to_string_lossy());
+                toml.push_str(&format!("control_path = {}\n", toml_string(&control_wsl)));
+            }
         }
     }
 
@@ -342,7 +367,15 @@ pub fn build_diffusion_pipe_command(
         .join(format!("{job_id}.dp.dataset.toml"));
     let group_types =
         state.with_db(|connection| db::load_dataset_group_types(connection, &project.id))?;
-    write_diffusion_pipe_dataset_toml(project, config, &dataset_toml_path, &group_types)?;
+    let control_dirs =
+        state.with_db(|connection| db::load_dataset_control_dirs(connection, &project.id))?;
+    write_diffusion_pipe_dataset_toml(
+        project,
+        config,
+        &dataset_toml_path,
+        &group_types,
+        &control_dirs,
+    )?;
     let dataset_toml_wsl = windows_path_to_wsl(&dataset_toml_path.to_string_lossy());
 
     // Write main TOML
@@ -354,17 +387,21 @@ pub fn build_diffusion_pipe_command(
     let mut bash_parts: Vec<String> = Vec::new();
 
     if !venv_path.is_empty() {
-        bash_parts.push(format!("source {}/bin/activate", venv_path));
+        bash_parts.push(format!(
+            "source {}/bin/activate",
+            bash_shell_quote(venv_path)
+        ));
     }
 
     if config.nccl_disable {
         bash_parts.push("export NCCL_P2P_DISABLE=1 NCCL_IB_DISABLE=1".to_string());
     }
 
-    bash_parts.push(format!("cd {dp_wsl_path}"));
+    bash_parts.push(format!("cd {}", bash_shell_quote(dp_wsl_path)));
 
     let mut ds_cmd = format!(
-        "deepspeed --num_gpus={num_gpus} train.py --deepspeed --config {main_toml_wsl}"
+        "deepspeed --num_gpus={num_gpus} train.py --deepspeed --config {}",
+        bash_shell_quote(&main_toml_wsl)
     );
 
     let resume = config.resume_from_checkpoint.trim();
@@ -373,7 +410,10 @@ pub fn build_diffusion_pipe_command(
             ds_cmd.push_str(" --resume_from_checkpoint");
         } else {
             let resume_wsl = windows_path_to_wsl(resume);
-            ds_cmd.push_str(&format!(" --resume_from_checkpoint {resume_wsl}"));
+            ds_cmd.push_str(&format!(
+                " --resume_from_checkpoint {}",
+                bash_shell_quote(&resume_wsl)
+            ));
         }
     }
 
@@ -392,6 +432,8 @@ pub fn build_diffusion_pipe_command(
     };
 
     command.env("PYTHONUNBUFFERED", "1");
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
 
     Ok((command, RuntimeJobControlMode::ProcessSignals))
 }
@@ -568,5 +610,19 @@ pub async fn start_diffusion_pipe_training(
     state
         .with_db(|connection| db::get_active_job(connection, Some(&project.id)))?
         .ok_or_else(|| AppError::Process("Failed to load started job summary".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::windows_path_to_wsl;
+
+    #[test]
+    fn windows_path_to_wsl_handles_spaces() {
+        let win = r"D:\ComfyUI windows portable\train\gufeng\output\20260606_18-58-23";
+        assert_eq!(
+            windows_path_to_wsl(win),
+            "/mnt/d/ComfyUI windows portable/train/gufeng/output/20260606_18-58-23"
+        );
+    }
 }
 

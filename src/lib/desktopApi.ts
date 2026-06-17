@@ -340,6 +340,75 @@ export function setDatasetGroupType(
   });
 }
 
+export interface ImportFilePayload {
+  name: string;
+  dataBase64: string;
+}
+
+/** Writes uploaded image bytes into `targetRelativePath` ("" = dataset root). */
+export function importDatasetImages(
+  projectId: string,
+  targetRelativePath: string,
+  files: ImportFilePayload[],
+): Promise<DatasetEntry[]> {
+  return invoke("import_dataset_images", {
+    input: { projectId, targetRelativePath, files },
+  });
+}
+
+export interface EditPairImportResult {
+  targetRelativePath: string;
+  controlRelativePath: string;
+  entries: DatasetEntry[];
+}
+
+/** Writes a target/control image pair (same stem) plus an optional edit caption. */
+export function importEditPair(
+  projectId: string,
+  targetRelativePath: string,
+  controlRelativePath: string,
+  target: ImportFilePayload,
+  control: ImportFilePayload,
+  caption?: string | null,
+): Promise<EditPairImportResult> {
+  return invoke("import_edit_pair", {
+    input: {
+      projectId,
+      targetRelativePath,
+      controlRelativePath,
+      target,
+      control,
+      caption: caption ?? null,
+    },
+  });
+}
+
+export function setDatasetControlDir(
+  projectId: string,
+  targetRelativePath: string,
+  controlRelativePath: string,
+): Promise<void> {
+  return invoke("set_dataset_control_dir", {
+    input: { projectId, targetRelativePath, controlRelativePath },
+  });
+}
+
+export function removeDatasetControlDir(
+  projectId: string,
+  targetRelativePath: string,
+): Promise<void> {
+  return invoke("remove_dataset_control_dir", {
+    input: { projectId, targetRelativePath },
+  });
+}
+
+/** Returns a map of target-folder → control-folder for edit-model training. */
+export function loadDatasetControlDirs(
+  projectId: string,
+): Promise<Record<string, string>> {
+  return invoke("load_dataset_control_dirs", { input: { projectId } });
+}
+
 /** Returns the subset of `relativePaths` whose caption (.txt) is absent or empty. */
 export function listUntaggedImagePaths(
   projectId: string,
@@ -379,10 +448,12 @@ export function autoTagImage(
   previousImageRelativePath?: string | null,
   tagMode?: CaptionTagMode | null,
   currentCaption?: string | null,
+  controlRelativePath?: string | null,
 ): Promise<string> {
   const trimmed = userMessage?.trim() ?? "";
   const prev = previousAssistantCaption?.trim();
   const prevImg = previousImageRelativePath?.trim();
+  const control = controlRelativePath?.trim();
   const caption = currentCaption?.trim() ?? "";
   const isConversation = tagMode === "conversationModify";
   return invoke("auto_tag_image", {
@@ -403,6 +474,7 @@ export function autoTagImage(
       : caption.length > 0
         ? caption
         : null,
+    controlRelativePath: control && control.length > 0 ? control : null,
   });
 }
 

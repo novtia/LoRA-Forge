@@ -15,6 +15,7 @@
 
 use std::sync::Arc;
 
+use crate::agent_error::AppResult;
 use crate::ai::agent::config::definition::{AgentDefinition, Isolation};
 use crate::ai::agent::core::attachment::Attachment;
 use crate::ai::agent::core::context::{AbortHandle, AbortSignal, ToolUseContext};
@@ -25,7 +26,6 @@ use crate::ai::agent::exec::query::{QueryEngine, QueryRequest, QueryResult, Tool
 use crate::ai::agent::tools::ToolPool;
 use crate::ai::agent::types::{AgentId, AgentRunMode, QuerySource, TokenUsage};
 use crate::ai::chat::{ChatRequest, ImageResult, TextDeltaCallback};
-use crate::agent_error::AppResult;
 
 /// Inputs to [`run_agent`].
 pub struct RunAgentParams {
@@ -108,8 +108,8 @@ pub async fn run_agent(params: RunAgentParams) -> AppResult<RunAgentResult> {
     let agent_id = AgentId::new();
 
     let mut task = Task::new_local(agent_id.clone(), &definition.agent_type, prompt.clone());
-    task.background = matches!(run_mode, AgentRunMode::Background | AgentRunMode::Fork)
-        || definition.background;
+    task.background =
+        matches!(run_mode, AgentRunMode::Background | AgentRunMode::Fork) || definition.background;
     let task_id = task_store.register(task);
 
     let host_cwd = std::env::current_dir().unwrap_or_default();
@@ -252,7 +252,10 @@ fn compose_system_prompt(
     let mut out = String::with_capacity(2048);
 
     if matches!(run_mode, AgentRunMode::Fork) {
-        if let Some(parent) = parent_system_prompt.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(parent) = parent_system_prompt
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             out.push_str(parent);
             out.push_str("\n\n---\n\n");
         }

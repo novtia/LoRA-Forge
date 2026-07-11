@@ -3,19 +3,12 @@
  * @description 单图打标完整流程：从 DB 读取项目与 LLM 设置 → 解析图片路径 → 调 LLM 打标流水线。
  *   不依赖 Tauri，可被 commands 层和批量任务共享调用。
  */
-
 use std::{
     path::PathBuf,
     sync::{atomic::AtomicBool, Arc},
 };
 
-use crate::{
-    db,
-    error::AppResult,
-    llm,
-    models::CaptionTagMode,
-    state::AppState,
-};
+use crate::{db, error::AppResult, llm, models::CaptionTagMode, state::AppState};
 
 /// 对数据集中的单张图片执行 LLM 打标，返回生成的 caption 字符串。
 ///
@@ -69,7 +62,11 @@ pub async fn caption_image(
     // 否则传 None（防止错误数据导致 IO 错误打断主流程）。
     let previous_image_path = previous_image_relative_path.and_then(|rel| {
         let resolved = resolve_dataset_path(&dataset_root, rel).ok()?;
-        if resolved.is_file() { Some(resolved) } else { None }
+        if resolved.is_file() {
+            Some(resolved)
+        } else {
+            None
+        }
     });
 
     llm::caption_for_dataset_image(

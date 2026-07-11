@@ -22,8 +22,8 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 use crate::agent_error::{AppError, AppResult};
+use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 
 const TOOL_NAME: &str = "Bash";
 const DEFAULT_TIMEOUT_SECS: u64 = 60;
@@ -87,7 +87,9 @@ impl Tool for BashTool {
             .and_then(Value::as_str)
             .ok_or_else(|| AppError::Invalid("Bash: `command` must be a string".into()))?;
         if command.trim().is_empty() {
-            return Err(AppError::Invalid("Bash: `command` must be non-empty".into()));
+            return Err(AppError::Invalid(
+                "Bash: `command` must be non-empty".into(),
+            ));
         }
         Ok(())
     }

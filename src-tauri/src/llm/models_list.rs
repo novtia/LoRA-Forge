@@ -3,9 +3,7 @@
 use reqwest::Client;
 use serde_json::Value;
 
-use crate::{
-    error::{AppError, AppResult},
-};
+use crate::error::{AppError, AppResult};
 
 fn shared_client() -> &'static Client {
     crate::llm::http::shared_http_client()
@@ -28,10 +26,7 @@ fn normalize_models_url(endpoint_url: &str) -> AppResult<String> {
     Ok(format!("{trimmed}/models"))
 }
 
-pub async fn fetch_remote_model_ids(
-    endpoint_url: &str,
-    api_key: &str,
-) -> AppResult<Vec<String>> {
+pub async fn fetch_remote_model_ids(endpoint_url: &str, api_key: &str) -> AppResult<Vec<String>> {
     let url = normalize_models_url(endpoint_url)?;
     let mut request = shared_client().get(&url);
     if !api_key.trim().is_empty() {
@@ -50,13 +45,18 @@ pub async fn fetch_remote_model_ids(
         let detail = extract_error_message(&body);
         let code = status.as_u16();
         if code == 429 || (500..600).contains(&code) {
-            return Err(AppError::HttpServer { status: code, detail });
+            return Err(AppError::HttpServer {
+                status: code,
+                detail,
+            });
         }
-        return Err(AppError::HttpClient { status: code, detail });
+        return Err(AppError::HttpClient {
+            status: code,
+            detail,
+        });
     }
-    let payload: Value = serde_json::from_str(&body).map_err(|err| {
-        AppError::Parse(format!("Failed to parse /models response: {err}"))
-    })?;
+    let payload: Value = serde_json::from_str(&body)
+        .map_err(|err| AppError::Parse(format!("Failed to parse /models response: {err}")))?;
     let mut ids = Vec::new();
     if let Some(data) = payload.get("data").and_then(Value::as_array) {
         for item in data {

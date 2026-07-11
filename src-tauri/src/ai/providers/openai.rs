@@ -3,13 +3,13 @@ use futures_util::StreamExt;
 use reqwest::StatusCode;
 use serde_json::{json, Map, Value};
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::chat::{
     emit_thinking_deltas, AttachmentBytes, ChatRequest, GenerateResponse, HistoryTurn, ImageResult,
     StreamDelta, TextDeltaCallback,
 };
 use crate::ai::providers::{ChatProvider, ProviderFuture, OPENAI_RESPONSES_SDK, OPENAI_SDK};
 use crate::ai::{tokens, tokens::TokenUsage};
-use crate::agent_error::{AppError, AppResult};
 
 const UPSTREAM_TIMEOUT_SECS: u64 = 15 * 60;
 const MAX_ATTEMPTS: usize = 3;
@@ -27,8 +27,7 @@ fn debug_log_upstream_request(label: &str, endpoint: &str, body: &Value) {
     if !upstream_debug() {
         return;
     }
-    let body_str = serde_json::to_string_pretty(body)
-        .unwrap_or_else(|_| body.to_string());
+    let body_str = serde_json::to_string_pretty(body).unwrap_or_else(|_| body.to_string());
     eprintln!(
         "[ATELIER_DEBUG_UPSTREAM] {} POST {}\n{}",
         label, endpoint, body_str
@@ -62,10 +61,7 @@ fn debug_log_sse_event(emitted: &mut u32, max: u32, event: &str) {
     let suffix = if event.len() > 1200 { "…" } else { "" };
     eprintln!(
         "[ATELIER_DEBUG_UPSTREAM] SSE event {}/{} (preview):\n{}{}",
-        *emitted,
-        max,
-        preview,
-        suffix
+        *emitted, max, preview, suffix
     );
 }
 
@@ -1116,7 +1112,10 @@ fn finalize_stream_response(
     };
     if images.is_empty()
         && text.as_deref().map(str::is_empty).unwrap_or(true)
-        && thinking_content.as_deref().map(str::is_empty).unwrap_or(true)
+        && thinking_content
+            .as_deref()
+            .map(str::is_empty)
+            .unwrap_or(true)
         && tool_calls.is_empty()
     {
         return Err(AppError::Upstream(
@@ -1148,11 +1147,7 @@ fn upstream_http_error(
 ) -> AppError {
     AppError::Upstream(format!(
         "{} model={} POST {} HTTP {}: {}",
-        provider_label,
-        request.model,
-        request.provider.endpoint,
-        status,
-        msg
+        provider_label, request.model, request.provider.endpoint, status, msg
     ))
 }
 
@@ -1243,8 +1238,7 @@ fn build_chat_body(request: &ChatRequest, allow_image_parts: bool) -> Value {
     request
         .parameters
         .apply_thinking_params(map, &request.provider.endpoint);
-    if is_openrouter_endpoint(&request.provider.endpoint)
-        && openrouter_wants_image_output(request)
+    if is_openrouter_endpoint(&request.provider.endpoint) && openrouter_wants_image_output(request)
     {
         if let Some(image_config) = request.parameters.image_config() {
             map.insert("image_config".into(), image_config);
@@ -1438,11 +1432,7 @@ fn openrouter_wants_image_output(request: &ChatRequest) -> bool {
     if request.parameters.image_config().is_some() {
         return true;
     }
-    request
-        .model
-        .trim()
-        .to_ascii_lowercase()
-        .contains("image")
+    request.model.trim().to_ascii_lowercase().contains("image")
 }
 
 fn openrouter_initial_modality_stage(request: &ChatRequest) -> u8 {
@@ -1669,7 +1659,10 @@ fn top_level_error_message(v: &Value) -> Option<String> {
 }
 
 fn extract_openai_chat_tool_calls(v: &Value) -> Vec<crate::ai::chat::ProviderToolCall> {
-    let Some(arr) = v.pointer("/choices/0/message/tool_calls").and_then(Value::as_array) else {
+    let Some(arr) = v
+        .pointer("/choices/0/message/tool_calls")
+        .and_then(Value::as_array)
+    else {
         return Vec::new();
     };
     arr.iter()

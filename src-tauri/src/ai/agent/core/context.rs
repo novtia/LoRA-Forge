@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex};
 
 use tokio::sync::watch;
 
-use crate::ai::agent::memory::UserContext;
 use crate::ai::agent::core::permission::PermissionMode;
+use crate::ai::agent::memory::UserContext;
 use crate::ai::agent::types::{AgentId, MessageRole, QuerySource};
 
 /// Snapshot of the runtime context attached to every tool invocation.

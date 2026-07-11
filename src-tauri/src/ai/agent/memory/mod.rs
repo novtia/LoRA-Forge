@@ -25,8 +25,8 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai::agent::types::{AgentId, MessageId, TokenUsage};
 use crate::agent_error::AppResult;
+use crate::ai::agent::types::{AgentId, MessageId, TokenUsage};
 
 /// MemoryType taxonomy from `utils/memory/types.ts`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

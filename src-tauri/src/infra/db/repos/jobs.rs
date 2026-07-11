@@ -2,7 +2,6 @@
  * @file infra/db/repos/jobs.rs
  * @description jobs / job_logs / job_snapshots 表：创建任务、追加日志/快照、查询活跃任务摘要。
  */
-
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{
@@ -328,7 +327,11 @@ fn row_to_job_identity(
     ))
 }
 
-fn training_log_channel(kind: Option<&str>, stage: Option<&str>, code: Option<&str>) -> &'static str {
+fn training_log_channel(
+    kind: Option<&str>,
+    stage: Option<&str>,
+    code: Option<&str>,
+) -> &'static str {
     if kind.is_some() || stage.is_some() || code.is_some() {
         "rich"
     } else {

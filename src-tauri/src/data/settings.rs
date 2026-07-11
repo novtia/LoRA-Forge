@@ -1,8 +1,8 @@
 use rusqlite::params;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::data::db::DbConn;
 use crate::agent_error::{AppError, AppResult};
+use crate::data::db::DbConn;
 
 pub const KEY_DEFAULT_RATIO: &str = "default_aspect_ratio";
 pub const KEY_DEFAULT_SIZE: &str = "default_image_size";

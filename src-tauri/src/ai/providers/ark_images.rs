@@ -5,11 +5,11 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use reqwest::StatusCode;
 use serde_json::{json, Value};
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::chat::{AttachmentBytes, ChatRequest, GenerateResponse, ImageResult};
 use crate::ai::parameters::GenerationParameters;
 use crate::ai::providers::{ChatProvider, ProviderFuture, ARK_IMAGES_SDK};
 use crate::ai::tokens::TokenUsage;
-use crate::agent_error::{AppError, AppResult};
 
 const UPSTREAM_TIMEOUT_SECS: u64 = 15 * 60;
 const MAX_ATTEMPTS: usize = 3;

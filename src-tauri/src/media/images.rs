@@ -7,9 +7,9 @@ use serde::Serialize;
 use tauri::AppHandle;
 use ulid::Ulid;
 
+use crate::agent_error::{AppError, AppResult};
 use crate::data::db::DbConn;
 use crate::data::{paths, session};
-use crate::agent_error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AttachmentDraft {

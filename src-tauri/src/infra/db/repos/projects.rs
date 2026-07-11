@@ -2,7 +2,6 @@
  * @file infra/db/repos/projects.rs
  * @description projects 表 CRUD：创建、列表、查询、更新 status/tags。
  */
-
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{
@@ -101,10 +100,19 @@ pub fn update_project_record(
         SET name = ?1, root_path = ?2, dataset_path = ?3, output_path = ?4, updated_at = ?5
         WHERE id = ?6
         ",
-        params![name, root_path, dataset_path, output_path, now_ts(), project_id],
+        params![
+            name,
+            root_path,
+            dataset_path,
+            output_path,
+            now_ts(),
+            project_id
+        ],
     )?;
     if rows == 0 {
-        return Err(AppError::NotFound(format!("Project '{project_id}' does not exist")));
+        return Err(AppError::NotFound(format!(
+            "Project '{project_id}' does not exist"
+        )));
     }
     Ok(())
 }
@@ -117,7 +125,9 @@ pub fn delete_project(connection: &Connection, project_id: &str) -> AppResult<()
     )?;
     let rows = connection.execute("DELETE FROM projects WHERE id = ?1", params![project_id])?;
     if rows == 0 {
-        return Err(AppError::NotFound(format!("Project '{project_id}' does not exist")));
+        return Err(AppError::NotFound(format!(
+            "Project '{project_id}' does not exist"
+        )));
     }
     Ok(())
 }

@@ -3,7 +3,6 @@
  * @description 训练领域类型：`JobStatus`、`TrainingConfig`（含 validate / summary_tags）、
  *   `TrainingEnvSettings`、`DiffusionPipeConfig`、`TrainingSnapshot`/`TrainingLogLine`/事件 payload 等。
  */
-
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -202,6 +201,104 @@ pub struct TrainingConfig {
     pub resume: String,
     pub initial_epoch: u32,
     pub initial_step: u32,
+    // Extended sd-scripts training surface. These deliberately exclude
+    // launcher/DDP internals and repository/environment settings.
+    pub v2: bool,
+    pub v_parameterization: bool,
+    pub tokenizer_cache_dir: String,
+    pub network_module: String,
+    pub network_args: String,
+    pub network_train_unet_only: bool,
+    pub network_train_text_encoder_only: bool,
+    pub dim_from_weights: bool,
+    pub scale_weight_norms: String,
+    pub base_weights: String,
+    pub base_weights_multiplier: String,
+    pub training_comment: String,
+    pub no_metadata: bool,
+    pub save_model_as: String,
+    pub gradient_accumulation_steps: u32,
+    pub full_fp16: bool,
+    pub full_bf16: bool,
+    pub fp8_base: bool,
+    pub fp8_base_unet: bool,
+    pub mem_eff_attn: bool,
+    pub sdpa: bool,
+    pub torch_compile: bool,
+    pub dynamo_backend: String,
+    pub lowram: bool,
+    pub highvram: bool,
+    pub no_half_vae: bool,
+    pub cpu_offload_checkpointing: bool,
+    pub cache_text_encoder_outputs: bool,
+    pub cache_text_encoder_outputs_to_disk: bool,
+    pub text_encoder_batch_size: u32,
+    pub disable_mmap_load_safetensors: bool,
+    pub blocks_to_swap: u32,
+    pub fused_backward_pass: bool,
+    pub lr_scheduler_type: String,
+    pub lr_scheduler_args: String,
+    pub lr_decay_steps: String,
+    pub lr_scheduler_timescale: String,
+    pub lr_scheduler_min_lr_ratio: String,
+    pub save_n_epoch_ratio: u32,
+    pub save_last_n_epochs_state: u32,
+    pub save_last_n_steps_state: u32,
+    pub save_state: bool,
+    pub save_state_on_train_end: bool,
+    pub skip_until_initial_step: bool,
+    pub max_token_length: u32,
+    pub noise_offset_random_strength: bool,
+    pub multires_noise_iterations: u32,
+    pub multires_noise_discount: String,
+    pub ip_noise_gamma: String,
+    pub ip_noise_gamma_random_strength: bool,
+    pub adaptive_noise_scale: String,
+    pub zero_terminal_snr: bool,
+    pub min_timestep: u32,
+    pub max_timestep: u32,
+    pub loss_type: String,
+    pub huber_schedule: String,
+    pub huber_c: String,
+    pub huber_scale: String,
+    pub prior_loss_weight: String,
+    pub masked_loss: bool,
+    pub conditioning_data_dir: String,
+    pub caption_separator: String,
+    pub keep_tokens_separator: String,
+    pub secondary_separator: String,
+    pub enable_wildcard: bool,
+    pub caption_prefix: String,
+    pub caption_suffix: String,
+    pub flip_aug: bool,
+    pub face_crop_aug_range: String,
+    pub random_crop: bool,
+    pub vae_batch_size: u32,
+    pub skip_cache_check: bool,
+    pub skip_image_resolution: String,
+    pub bucket_no_upscale: bool,
+    pub resize_interpolation: String,
+    pub token_warmup_min: u32,
+    pub token_warmup_step: String,
+    pub alpha_mask: bool,
+    pub train_inpainting: bool,
+    pub caption_dropout_every_n_epochs: u32,
+    pub weighting_scheme: String,
+    pub logit_mean: String,
+    pub logit_std: String,
+    pub mode_scale: String,
+    pub validation_seed: u32,
+    pub validation_split: String,
+    pub validate_every_n_steps: u32,
+    pub validate_every_n_epochs: u32,
+    pub max_validation_steps: u32,
+    pub log_with: String,
+    pub logging_dir: String,
+    pub log_prefix: String,
+    pub log_tracker_name: String,
+    pub wandb_run_name: String,
+    pub wandb_api_key: String,
+    pub log_config: bool,
 }
 
 impl Default for TrainingConfig {
@@ -273,6 +370,102 @@ impl Default for TrainingConfig {
             resume: String::new(),
             initial_epoch: 0,
             initial_step: 0,
+            v2: false,
+            v_parameterization: false,
+            tokenizer_cache_dir: String::new(),
+            network_module: String::new(),
+            network_args: String::new(),
+            network_train_unet_only: false,
+            network_train_text_encoder_only: false,
+            dim_from_weights: false,
+            scale_weight_norms: String::new(),
+            base_weights: String::new(),
+            base_weights_multiplier: String::new(),
+            training_comment: String::new(),
+            no_metadata: false,
+            save_model_as: "safetensors".to_string(),
+            gradient_accumulation_steps: 1,
+            full_fp16: false,
+            full_bf16: false,
+            fp8_base: false,
+            fp8_base_unet: false,
+            mem_eff_attn: false,
+            sdpa: false,
+            torch_compile: false,
+            dynamo_backend: "inductor".to_string(),
+            lowram: false,
+            highvram: false,
+            no_half_vae: false,
+            cpu_offload_checkpointing: false,
+            cache_text_encoder_outputs: false,
+            cache_text_encoder_outputs_to_disk: false,
+            text_encoder_batch_size: 0,
+            disable_mmap_load_safetensors: false,
+            blocks_to_swap: 0,
+            fused_backward_pass: false,
+            lr_scheduler_type: String::new(),
+            lr_scheduler_args: String::new(),
+            lr_decay_steps: String::new(),
+            lr_scheduler_timescale: String::new(),
+            lr_scheduler_min_lr_ratio: String::new(),
+            save_n_epoch_ratio: 0,
+            save_last_n_epochs_state: 0,
+            save_last_n_steps_state: 0,
+            save_state: false,
+            save_state_on_train_end: false,
+            skip_until_initial_step: false,
+            max_token_length: 0,
+            noise_offset_random_strength: false,
+            multires_noise_iterations: 0,
+            multires_noise_discount: "0.3".to_string(),
+            ip_noise_gamma: String::new(),
+            ip_noise_gamma_random_strength: false,
+            adaptive_noise_scale: String::new(),
+            zero_terminal_snr: false,
+            min_timestep: 0,
+            max_timestep: 0,
+            loss_type: "l2".to_string(),
+            huber_schedule: "snr".to_string(),
+            huber_c: "0.1".to_string(),
+            huber_scale: "1.0".to_string(),
+            prior_loss_weight: "1.0".to_string(),
+            masked_loss: false,
+            conditioning_data_dir: String::new(),
+            caption_separator: ",".to_string(),
+            keep_tokens_separator: String::new(),
+            secondary_separator: String::new(),
+            enable_wildcard: false,
+            caption_prefix: String::new(),
+            caption_suffix: String::new(),
+            flip_aug: false,
+            face_crop_aug_range: String::new(),
+            random_crop: false,
+            vae_batch_size: 1,
+            skip_cache_check: false,
+            skip_image_resolution: String::new(),
+            bucket_no_upscale: false,
+            resize_interpolation: String::new(),
+            token_warmup_min: 1,
+            token_warmup_step: "0".to_string(),
+            alpha_mask: false,
+            train_inpainting: false,
+            caption_dropout_every_n_epochs: 0,
+            weighting_scheme: "uniform".to_string(),
+            logit_mean: "0".to_string(),
+            logit_std: "1".to_string(),
+            mode_scale: "1.29".to_string(),
+            validation_seed: 0,
+            validation_split: "0".to_string(),
+            validate_every_n_steps: 0,
+            validate_every_n_epochs: 0,
+            max_validation_steps: 0,
+            log_with: String::new(),
+            logging_dir: String::new(),
+            log_prefix: String::new(),
+            log_tracker_name: String::new(),
+            wandb_run_name: String::new(),
+            wandb_api_key: String::new(),
+            log_config: false,
         }
     }
 }
@@ -291,7 +484,9 @@ impl TrainingConfig {
         }
         if script == "anima_train_network.py" {
             if self.anima_qwen3.trim().is_empty() {
-                return Err("Anima training requires the Qwen3 text encoder path (--qwen3)".to_string());
+                return Err(
+                    "Anima training requires the Qwen3 text encoder path (--qwen3)".to_string(),
+                );
             }
             if self.vae.trim().is_empty() {
                 return Err("Anima training requires the Qwen-Image VAE path (--vae)".to_string());
@@ -319,7 +514,10 @@ impl TrainingConfig {
                 return Err("Max train steps must be greater than zero when using step-based training length".to_string());
             }
         } else if self.epochs == 0 {
-            return Err("Epochs must be greater than zero when using epoch-based training length".to_string());
+            return Err(
+                "Epochs must be greater than zero when using epoch-based training length"
+                    .to_string(),
+            );
         }
         if self.save_every_n_epochs == 0 {
             return Err("Save frequency must be greater than zero".to_string());
@@ -339,12 +537,12 @@ impl TrainingConfig {
                     "Minimum bucket resolution cannot exceed maximum bucket resolution".to_string(),
                 );
             }
-            let min_bucket_step = if script == "sdxl_train_network.py" || script == "anima_train_network.py"
-            {
-                32
-            } else {
-                64
-            };
+            let min_bucket_step =
+                if script == "sdxl_train_network.py" || script == "anima_train_network.py" {
+                    32
+                } else {
+                    64
+                };
             if self.bucket_reso_steps % min_bucket_step != 0 {
                 return Err(format!(
                     "Bucket resolution steps must be divisible by {min_bucket_step} for {script}"
@@ -397,7 +595,10 @@ impl TrainingConfig {
                 .lines()
                 .any(|line| !line.trim().is_empty())
         {
-            return Err("Sample prompt text is required when sample image generation is enabled".to_string());
+            return Err(
+                "Sample prompt text is required when sample image generation is enabled"
+                    .to_string(),
+            );
         }
         if sample_enabled && (self.sample_width == 0 || self.sample_height == 0) {
             return Err("Sample image width and height must be greater than zero".to_string());
@@ -408,7 +609,10 @@ impl TrainingConfig {
         if sample_enabled {
             let cfg_scale = self.sample_cfg_scale.trim();
             if cfg_scale.is_empty() {
-                return Err("Sample CFG scale is required when sample image generation is enabled".to_string());
+                return Err(
+                    "Sample CFG scale is required when sample image generation is enabled"
+                        .to_string(),
+                );
             }
             cfg_scale.parse::<f64>().map_err(|_| {
                 format!(
@@ -571,6 +775,53 @@ pub struct DiffusionPipeConfig {
     pub resume_from_checkpoint: String,
     pub nccl_disable: bool,
     pub steps_per_print: u32,
+    pub image_micro_batch_size_per_gpu: u32,
+    pub force_constant_lr: String,
+    pub lr_scheduler: String,
+    pub pseudo_huber_c: String,
+    pub eval_every_n_steps: u32,
+    pub eval_every_n_examples: u32,
+    pub eval_before_first_step: bool,
+    pub eval_micro_batch_size_per_gpu: u32,
+    pub image_eval_micro_batch_size_per_gpu: u32,
+    pub eval_gradient_accumulation_steps: u32,
+    pub disable_block_swap_for_eval: bool,
+    pub save_every_n_examples: u32,
+    pub checkpoint_every_n_epochs: u32,
+    pub reentrant_activation_checkpointing: bool,
+    pub compile: bool,
+    pub video_clip_mode: String,
+    pub x_axis_examples: bool,
+    pub uncond_fraction: String,
+    pub logging_steps: u32,
+    pub adapter_init_from_existing: String,
+    pub adapter_dropout: String,
+    pub lokr_decompose_factor: u32,
+    pub lokr_rank_dropout: String,
+    pub optimizer_betas: String,
+    pub optimizer_eps: String,
+    pub optimizer_stabilize: bool,
+    pub optimizer_gradient_release: bool,
+    pub optimizer_args: String,
+    pub enable_wandb: bool,
+    pub wandb_api_key: String,
+    pub wandb_tracker_name: String,
+    pub wandb_run_name: String,
+    pub min_ar: String,
+    pub max_ar: String,
+    pub ar_buckets: String,
+    pub cache_shuffle_num: u32,
+    pub cache_shuffle_delimiter: String,
+    pub skip_empty_caption: bool,
+    pub mask_path: String,
+    pub model_guidance: String,
+    pub sigmoid_scale: String,
+    pub diffusion_model_dtype: String,
+    pub regenerate_cache: bool,
+    pub trust_cache: bool,
+    pub reset_dataloader: bool,
+    pub reset_optimizer: bool,
+    pub reset_optimizer_params: bool,
 }
 
 impl Default for DiffusionPipeConfig {
@@ -612,6 +863,53 @@ impl Default for DiffusionPipeConfig {
             resume_from_checkpoint: String::new(),
             nccl_disable: true,
             steps_per_print: 1,
+            image_micro_batch_size_per_gpu: 0,
+            force_constant_lr: String::new(),
+            lr_scheduler: "constant".to_string(),
+            pseudo_huber_c: String::new(),
+            eval_every_n_steps: 0,
+            eval_every_n_examples: 0,
+            eval_before_first_step: true,
+            eval_micro_batch_size_per_gpu: 1,
+            image_eval_micro_batch_size_per_gpu: 0,
+            eval_gradient_accumulation_steps: 1,
+            disable_block_swap_for_eval: false,
+            save_every_n_examples: 0,
+            checkpoint_every_n_epochs: 0,
+            reentrant_activation_checkpointing: false,
+            compile: false,
+            video_clip_mode: "single_beginning".to_string(),
+            x_axis_examples: false,
+            uncond_fraction: "0".to_string(),
+            logging_steps: 1,
+            adapter_init_from_existing: String::new(),
+            adapter_dropout: "0".to_string(),
+            lokr_decompose_factor: 4,
+            lokr_rank_dropout: "0".to_string(),
+            optimizer_betas: "0.9,0.99".to_string(),
+            optimizer_eps: "1e-8".to_string(),
+            optimizer_stabilize: false,
+            optimizer_gradient_release: false,
+            optimizer_args: String::new(),
+            enable_wandb: false,
+            wandb_api_key: String::new(),
+            wandb_tracker_name: String::new(),
+            wandb_run_name: String::new(),
+            min_ar: "0.5".to_string(),
+            max_ar: "2.0".to_string(),
+            ar_buckets: String::new(),
+            cache_shuffle_num: 0,
+            cache_shuffle_delimiter: ", ".to_string(),
+            skip_empty_caption: true,
+            mask_path: String::new(),
+            model_guidance: "1.0".to_string(),
+            sigmoid_scale: "1.0".to_string(),
+            diffusion_model_dtype: String::new(),
+            regenerate_cache: false,
+            trust_cache: false,
+            reset_dataloader: false,
+            reset_optimizer: false,
+            reset_optimizer_params: false,
         }
     }
 }

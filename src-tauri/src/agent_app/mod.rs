@@ -2,15 +2,16 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use crate::ai::agent::core::context::{AbortHandle, AbortSignal};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
-use crate::ai::agent::core::context::{AbortHandle, AbortSignal};
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::agent::config::mcp::McpRegistry;
-use crate::ai::agent::tools::agent_tool::{AgentTool, ChatRequestFactory};
 use crate::ai::agent::exec::engine::ProviderQueryEngine;
 use crate::ai::agent::exec::query::ToolEventCallback;
 use crate::ai::agent::memory::UserContextLoader;
+use crate::ai::agent::tools::agent_tool::{AgentTool, ChatRequestFactory};
 use crate::ai::agent::types::MessageEvent;
 use crate::ai::agent::{
     self, AgentRegistry, FileReadTool, FsSessionMemoryExtractor, FsUserContextLoader,
@@ -19,9 +20,10 @@ use crate::ai::agent::{
 };
 use crate::ai::{chat, parameters, router};
 use crate::data::db::DbPool;
-use crate::data::{db, llm_catalog, lora_project_bridge, lora_provider_bridge, paths, project, session, settings};
+use crate::data::{
+    db, llm_catalog, lora_project_bridge, lora_provider_bridge, paths, project, session, settings,
+};
 use crate::infra::state::AppState;
-use crate::agent_error::{AppError, AppResult};
 use crate::media::{editor, images};
 
 pub struct AgentAppState {
@@ -96,10 +98,7 @@ fn generation_abort_lock(
 /// Register a session-scoped abort controller and return the matching signal
 /// for the agent run. Repeated cancel clicks call [`AbortHandle::abort`] on the
 /// stored handle until the run finishes and the slot is cleared.
-fn register_generation_abort(
-    state: &AgentAppState,
-    session_id: &str,
-) -> AppResult<AbortSignal> {
+fn register_generation_abort(state: &AgentAppState, session_id: &str) -> AppResult<AbortSignal> {
     let (signal, handle) = AbortSignal::new();
     let mut guard = generation_abort_lock(state)?;
     if guard.contains_key(session_id) {
@@ -227,10 +226,7 @@ pub struct EffectiveSessionParams {
     pub context_window: Option<i64>,
 }
 
-fn effective_session_params(
-    conn: &db::DbConn,
-    sess: &session::Session,
-) -> EffectiveSessionParams {
+fn effective_session_params(conn: &db::DbConn, sess: &session::Session) -> EffectiveSessionParams {
     if let Some(ref pid) = sess.project_id {
         if let Ok(proj) = project::get(conn, pid) {
             return EffectiveSessionParams {
@@ -422,12 +418,10 @@ impl ChatRequestFactory for SettingsChatFactory {
                     if rendered.is_empty() {
                         Vec::new()
                     } else {
-                        vec![agent::Attachment::for_main(
-                            agent::AttachmentKind::Delta {
-                                topic: "user_context".into(),
-                                body: rendered.to_string(),
-                            },
-                        )]
+                        vec![agent::Attachment::for_main(agent::AttachmentKind::Delta {
+                            topic: "user_context".into(),
+                            body: rendered.to_string(),
+                        })]
                     }
                 })
                 .unwrap_or_default()
@@ -475,11 +469,7 @@ fn new_stream_blocks() -> StreamBlocks {
 }
 
 fn snapshot_stream_blocks(blocks: &StreamBlocks) -> Vec<serde_json::Value> {
-    blocks
-        .lock()
-        .ok()
-        .map(|g| g.clone())
-        .unwrap_or_default()
+    blocks.lock().ok().map(|g| g.clone()).unwrap_or_default()
 }
 
 fn concat_block_text(blocks: &[serde_json::Value], block_type: &str) -> String {
@@ -532,10 +522,7 @@ fn persist_streamed_assistant_snapshot(
             );
         }
         if has_blocks {
-            obj.insert(
-                "blocks".into(),
-                serde_json::Value::Array(blocks.to_vec()),
-            );
+            obj.insert("blocks".into(), serde_json::Value::Array(blocks.to_vec()));
         }
     }
     let params_json = params.to_string();
@@ -623,9 +610,7 @@ fn record_tool_result_block(
         if let Some(obj) = b.as_object_mut() {
             obj.insert(
                 "status".into(),
-                serde_json::Value::String(
-                    if is_error { "error" } else { "success" }.into(),
-                ),
+                serde_json::Value::String(if is_error { "error" } else { "success" }.into()),
             );
             obj.insert("output".into(), output.clone());
             if is_error {
@@ -720,7 +705,9 @@ fn tool_event_callback(
 // ????????? Settings ?????????
 
 #[tauri::command]
-pub fn get_settings(state: tauri::State<Arc<AgentAppState>>) -> Result<settings::Settings, AppError> {
+pub fn get_settings(
+    state: tauri::State<Arc<AgentAppState>>,
+) -> Result<settings::Settings, AppError> {
     state.merged_settings()
 }
 
@@ -729,10 +716,9 @@ pub fn update_settings(
     state: tauri::State<Arc<AgentAppState>>,
     patch: settings::SettingsPatch,
 ) -> Result<settings::Settings, AppError> {
-    if let (Some(provider_id), Some(model)) = (
-        patch.active_provider_id.as_deref(),
-        patch.model.as_deref(),
-    ) {
+    if let (Some(provider_id), Some(model)) =
+        (patch.active_provider_id.as_deref(), patch.model.as_deref())
+    {
         state
             .lora
             .with_db(|lora_conn| {
@@ -870,20 +856,11 @@ pub fn create_session(
                     .find(|p| p.id == s.active_provider_id)
                     .map(|p| p.sdk.as_str())
                     .unwrap_or("");
-                let cw = llm_catalog::lookup_context_window(
-                    &conn,
-                    &s.active_provider_id,
-                    sdk,
-                    &model,
-                )
-                .ok()
-                .flatten();
-                let _ = session::set_model_and_context(
-                    &conn,
-                    &sess.id,
-                    Some(model.as_str()),
-                    cw,
-                );
+                let cw =
+                    llm_catalog::lookup_context_window(&conn, &s.active_provider_id, sdk, &model)
+                        .ok()
+                        .flatten();
+                let _ = session::set_model_and_context(&conn, &sess.id, Some(model.as_str()), cw);
                 sess.model = Some(model);
                 sess.context_window = cw;
             }
@@ -950,19 +927,9 @@ pub fn set_session_model(
             .find(|p| p.id == s.active_provider_id)
             .map(|p| p.sdk.as_str())
             .unwrap_or("");
-        cw = llm_catalog::lookup_context_window(
-            &conn,
-            &s.active_provider_id,
-            sdk,
-            &args.model,
-        )?;
+        cw = llm_catalog::lookup_context_window(&conn, &s.active_provider_id, sdk, &args.model)?;
     }
-    session::set_model_and_context(
-        &conn,
-        &args.id,
-        Some(args.model.as_str()),
-        cw,
-    )
+    session::set_model_and_context(&conn, &args.id, Some(args.model.as_str()), cw)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1323,9 +1290,9 @@ pub fn cancel_agent_task(
     if let Some(slot) = state.task_store.get(&id) {
         if let Ok(t) = slot.lock() {
             if let Some(note) = agent::TaskNotification::from_task(&t) {
-                state
-                    .notifications
-                    .push(agent::Attachment::for_main(agent::AttachmentKind::TaskNotification(note)));
+                state.notifications.push(agent::Attachment::for_main(
+                    agent::AttachmentKind::TaskNotification(note),
+                ));
             }
         }
     }
@@ -1525,8 +1492,7 @@ pub async fn generate_image(
         let conn = state.conn()?;
         let s = state.merged_settings()?;
         let session_config = session::get(&conn, &req.session_id)?;
-        let generation_agent =
-            session::generation_agent_definition_key(&session_config.agent_type);
+        let generation_agent = session::generation_agent_definition_key(&session_config.agent_type);
         let project_cwd = session_project_cwd(&conn, &req.session_id);
         let eff = effective_session_params(&conn, &session_config);
         let session_prompt = eff.system_prompt;
@@ -1741,8 +1707,7 @@ pub async fn regenerate_image(
         let conn = state.conn()?;
         let s = state.merged_settings()?;
         let session_config = session::get(&conn, &req.session_id)?;
-        let generation_agent =
-            session::generation_agent_definition_key(&session_config.agent_type);
+        let generation_agent = session::generation_agent_definition_key(&session_config.agent_type);
         let project_cwd = session_project_cwd(&conn, &req.session_id);
         let eff = effective_session_params(&conn, &session_config);
         let session_prompt = eff.system_prompt;
@@ -2134,14 +2099,18 @@ pub fn initialize(app: &AppHandle, lora: AppState) -> AppResult<Arc<AgentAppStat
     tools.register(crate::ai::agent::tools::bash::BashTool::new());
     tools.register(crate::ai::agent::tools::todo::TodoListTool::new());
 
-    let chat_factory: Arc<dyn ChatRequestFactory> =
-        Arc::new(SettingsChatFactory::new(pool.clone(), lora.clone(), user_context.clone()));
+    let chat_factory: Arc<dyn ChatRequestFactory> = Arc::new(SettingsChatFactory::new(
+        pool.clone(),
+        lora.clone(),
+        user_context.clone(),
+    ));
     let permission_resolver: Arc<dyn agent::PermissionResolver> = Arc::new(
         crate::ai::agent::core::permission::PlanModeResolver::new(agent::AllowAllResolver),
     );
-    let query_engine: Arc<dyn agent::QueryEngine> = Arc::new(
-        ProviderQueryEngine::new(provider_engine.clone(), permission_resolver),
-    );
+    let query_engine: Arc<dyn agent::QueryEngine> = Arc::new(ProviderQueryEngine::new(
+        provider_engine.clone(),
+        permission_resolver,
+    ));
     let agent_tool = AgentTool::new(
         registry.clone(),
         tools.clone(),

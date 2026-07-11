@@ -2,11 +2,7 @@
  * @file commands/dataset/caption.rs
  * @description Caption 相关命令：读写/删除图片+caption、LLM 自动打标、取消、列出未打标路径。
  */
-
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
 use tauri::State;
 
@@ -19,11 +15,11 @@ use crate::{
     state::AppState,
 };
 
-use super::{
-    ListUntaggedImagePathsInput, SaveCaptionInput, caption_path_for_image,
-    read_caption_file, resolve_dataset_path,
-};
 use super::browse::list_dataset_entries_inner;
+use super::{
+    caption_path_for_image, read_caption_file, resolve_dataset_path, ListUntaggedImagePathsInput,
+    SaveCaptionInput,
+};
 
 #[tauri::command]
 pub fn read_caption(
@@ -154,7 +150,10 @@ pub fn list_untagged_image_paths(
     input: ListUntaggedImagePathsInput,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    respond(list_untagged_image_paths_inner(state.inner().clone(), &input))
+    respond(list_untagged_image_paths_inner(
+        state.inner().clone(),
+        &input,
+    ))
 }
 
 #[tauri::command]
@@ -189,4 +188,3 @@ pub async fn auto_tag_image(
     app_state.finish_llm_caption(&key);
     respond(result)
 }
-

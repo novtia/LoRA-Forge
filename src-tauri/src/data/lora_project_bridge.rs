@@ -2,7 +2,6 @@
  * @file lora_project_bridge.rs
  * @description 将 lora 训练项目同步到 Agent projects 表，供会话归属与 cwd 使用。
  */
-
 use rusqlite::Connection;
 use std::collections::HashSet;
 

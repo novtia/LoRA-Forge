@@ -1,9 +1,8 @@
-﻿pub mod batch;
+pub mod batch;
 pub mod browse;
 pub mod caption;
 pub mod group;
 pub mod import;
-
 
 use std::{
     fs,
@@ -14,14 +13,8 @@ use std::collections::HashMap;
 
 use crate::{
     error::{AppError, AppResult},
-    models::{
-        DatasetEntry, DatasetEntryKind,
-        DatasetGroupType,
-    },
-    utils::{
-        cmp_str_natural, ensure_within,
-        normalize_relative_path,
-    },
+    models::{DatasetEntry, DatasetEntryKind, DatasetGroupType},
+    utils::{cmp_str_natural, ensure_within, normalize_relative_path},
 };
 
 use serde::Deserialize;
@@ -168,12 +161,8 @@ pub(super) fn visit_dataset(
 pub(super) fn collect_images(root: &Path) -> AppResult<Vec<PathBuf>> {
     let mut images = Vec::new();
     visit_images(root, &mut images)?;
-    images.sort_by(|left, right| {
-        cmp_str_natural(
-            &left.to_string_lossy(),
-            &right.to_string_lossy(),
-        )
-    });
+    images
+        .sort_by(|left, right| cmp_str_natural(&left.to_string_lossy(), &right.to_string_lossy()));
     Ok(images)
 }
 
@@ -234,13 +223,15 @@ pub(super) fn relative_path_from_dataset_root(
 ) -> AppResult<String> {
     let canon_root = fs::canonicalize(dataset_root)?;
     let canon_abs = fs::canonicalize(absolute)?;
-    Ok(normalize_relative_path(canon_abs.strip_prefix(&canon_root).map_err(|_| {
-        AppError::Validation(format!(
-            "Path '{}' is outside dataset root '{}'.",
-            absolute.display(),
-            dataset_root.display()
-        ))
-    })?))
+    Ok(normalize_relative_path(
+        canon_abs.strip_prefix(&canon_root).map_err(|_| {
+            AppError::Validation(format!(
+                "Path '{}' is outside dataset root '{}'.",
+                absolute.display(),
+                dataset_root.display()
+            ))
+        })?,
+    ))
 }
 
 pub(super) fn caption_path_for_image(path: &Path) -> PathBuf {
@@ -267,4 +258,3 @@ pub(super) fn is_image_file(path: &Path) -> bool {
         })
         .unwrap_or(false)
 }
-

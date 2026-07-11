@@ -3,7 +3,6 @@
  * @description llm_providers / llm_settings 表操作，合并原 llm_provider_db.rs。
  *   包含：供应商 CRUD、全局设置读写、旧版迁移、生效设置解析。
  */
-
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{
@@ -128,7 +127,12 @@ pub fn migrate_llm_providers_if_needed(connection: &Connection) -> AppResult<()>
 // provider helpers
 // ---------------------------------------------------------------------------
 
-fn provider_from_row(id: &str, config_json: &str, created_at: i64, updated_at: i64) -> AppResult<LlmProvider> {
+fn provider_from_row(
+    id: &str,
+    config_json: &str,
+    created_at: i64,
+    updated_at: i64,
+) -> AppResult<LlmProvider> {
     let cfg: LlmProviderConfigJson = serde_json::from_str(config_json)?;
     Ok(LlmProvider {
         id: id.to_string(),
@@ -178,7 +182,10 @@ fn update_llm_provider_row(connection: &Connection, provider: &LlmProvider) -> A
         params![provider.id, config_json, provider.updated_at],
     )?;
     if updated == 0 {
-        return Err(AppError::NotFound(format!("LLM provider '{}' not found", provider.id)));
+        return Err(AppError::NotFound(format!(
+            "LLM provider '{}' not found",
+            provider.id
+        )));
     }
     Ok(())
 }
@@ -215,7 +222,14 @@ pub fn get_llm_provider(connection: &Connection, provider_id: &str) -> AppResult
         .query_row(
             "SELECT id, config_json, created_at, updated_at FROM llm_providers WHERE id = ?1",
             params![provider_id],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            },
         )
         .map_err(|_| AppError::NotFound(format!("LLM provider '{provider_id}' not found")))?;
     let (id, json, ca, ua) = row;
@@ -287,10 +301,14 @@ pub fn update_llm_provider(
 }
 
 pub fn delete_llm_provider(connection: &Connection, provider_id: &str) -> AppResult<()> {
-    let deleted =
-        connection.execute("DELETE FROM llm_providers WHERE id = ?1", params![provider_id])?;
+    let deleted = connection.execute(
+        "DELETE FROM llm_providers WHERE id = ?1",
+        params![provider_id],
+    )?;
     if deleted == 0 {
-        return Err(AppError::NotFound(format!("LLM provider '{provider_id}' not found")));
+        return Err(AppError::NotFound(format!(
+            "LLM provider '{provider_id}' not found"
+        )));
     }
     let mut global = load_llm_global_settings(connection)?;
     if global.active_provider_id == provider_id {
@@ -298,7 +316,11 @@ pub fn delete_llm_provider(connection: &Connection, provider_id: &str) -> AppRes
             Ok(list) if !list.is_empty() => {
                 global.active_provider_id = list[0].id.clone();
                 if let Ok(p) = get_llm_provider(connection, &global.active_provider_id) {
-                    global.active_model_id = p.models.first().map(|m| m.model_id.clone()).unwrap_or_default();
+                    global.active_model_id = p
+                        .models
+                        .first()
+                        .map(|m| m.model_id.clone())
+                        .unwrap_or_default();
                 }
             }
             _ => {
@@ -328,12 +350,17 @@ pub fn add_llm_provider_model(
         return Err(AppError::Validation("Model ID is required".to_string()));
     }
     if provider.models.iter().any(|m| m.model_id == mid) {
-        return Err(AppError::Validation(format!("Model '{mid}' already exists for this provider")));
+        return Err(AppError::Validation(format!(
+            "Model '{mid}' already exists for this provider"
+        )));
     }
     provider.models.push(LlmProviderModelEntry {
         id: new_entity_id("mdl"),
         model_id: mid.to_string(),
-        label: label.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string),
+        label: label
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
         source,
     });
     provider.updated_at = now_ts();
@@ -358,7 +385,10 @@ pub fn update_llm_provider_model(
         entry.model_id = mid.to_string();
     }
     if label.is_some() {
-        entry.label = label.map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+        entry.label = label
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
     }
     provider.updated_at = now_ts();
     update_llm_provider_row(connection, &provider)?;
@@ -374,17 +404,25 @@ pub fn delete_llm_provider_model(
     let before = provider.models.len();
     provider.models.retain(|m| m.id != entry_id);
     if provider.models.len() == before {
-        return Err(AppError::NotFound(format!("Model entry '{entry_id}' not found")));
+        return Err(AppError::NotFound(format!(
+            "Model entry '{entry_id}' not found"
+        )));
     }
     provider.updated_at = now_ts();
     update_llm_provider_row(connection, &provider)?;
 
     let mut global = load_llm_global_settings(connection)?;
     if global.active_provider_id == provider_id
-        && !provider.models.iter().any(|m| m.model_id == global.active_model_id)
+        && !provider
+            .models
+            .iter()
+            .any(|m| m.model_id == global.active_model_id)
     {
-        global.active_model_id =
-            provider.models.first().map(|m| m.model_id.clone()).unwrap_or_default();
+        global.active_model_id = provider
+            .models
+            .first()
+            .map(|m| m.model_id.clone())
+            .unwrap_or_default();
         save_llm_global_settings(connection, &global)?;
     }
     Ok(provider)
@@ -493,7 +531,10 @@ pub fn save_llm_settings(connection: &Connection, settings: &LlmSettings) -> App
             provider.endpoint_kind = settings.endpoint_kind;
             provider.updated_at = now_ts();
             if !settings.model_id.trim().is_empty()
-                && !provider.models.iter().any(|m| m.model_id == settings.model_id)
+                && !provider
+                    .models
+                    .iter()
+                    .any(|m| m.model_id == settings.model_id)
             {
                 provider.models.push(LlmProviderModelEntry {
                     id: new_entity_id("mdl"),

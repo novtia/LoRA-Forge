@@ -21,18 +21,18 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+use crate::agent_error::AppResult;
 use crate::ai::agent::core::attachment::{Attachment, AttachmentKind};
 use crate::ai::agent::core::context::ToolUseContext;
 use crate::ai::agent::core::permission::{AllowAllResolver, PermissionRequest, PermissionResolver};
+use crate::ai::agent::core::task::{Task, TaskId, TaskState, TaskStore};
 use crate::ai::agent::exec::query::{
     QueryEngine, QueryFuture, QueryRequest, QueryResult, ToolEventCallback,
 };
-use crate::ai::agent::core::task::{Task, TaskId, TaskState, TaskStore};
 use crate::ai::agent::tools::{ToolInvocation, ToolPool, ToolResult};
 use crate::ai::agent::types::{AgentId, MessageEvent, MessageId};
 use crate::ai::chat::{ChatRequest, GenerateResponse, StreamDelta, TextDeltaCallback};
 use crate::ai::providers::ProviderFactory;
-use crate::agent_error::AppResult;
 
 /// One model turn as observed by the engine.
 ///
@@ -254,9 +254,7 @@ impl QueryEngine for ProviderQueryEngine {
                     tool_uses,
                 } = turn;
 
-                if let (Some(cb), Some(tracker)) =
-                    (on_text_delta.as_ref(), tracker.as_ref())
-                {
+                if let (Some(cb), Some(tracker)) = (on_text_delta.as_ref(), tracker.as_ref()) {
                     if tracker.thinking_chars.load(Ordering::Relaxed) == 0 {
                         if let Some(t) = response
                             .thinking_content
@@ -447,9 +445,7 @@ struct DeltaTracker {
 /// Wrap a [`TextDeltaCallback`] so we can observe whether the provider
 /// invoked it at all on a given turn. The returned `Arc<DeltaTracker>`
 /// is read once the turn completes.
-fn wrap_tracking_callback(
-    inner: TextDeltaCallback,
-) -> (TextDeltaCallback, Arc<DeltaTracker>) {
+fn wrap_tracking_callback(inner: TextDeltaCallback) -> (TextDeltaCallback, Arc<DeltaTracker>) {
     let tracker = Arc::new(DeltaTracker {
         text_chars: AtomicUsize::new(0),
         thinking_chars: AtomicUsize::new(0),
@@ -460,7 +456,8 @@ fn wrap_tracking_callback(
             t.text_chars.fetch_add(s.chars().count(), Ordering::Relaxed);
         }
         if let Some(s) = delta.thinking.as_deref() {
-            t.thinking_chars.fetch_add(s.chars().count(), Ordering::Relaxed);
+            t.thinking_chars
+                .fetch_add(s.chars().count(), Ordering::Relaxed);
         }
         inner(delta);
     });

@@ -2,7 +2,6 @@
  * @file infra/hardware.rs
  * @description 硬件信息探测（GPU/VRAM），优先 nvidia-smi，回退到 Win32_VideoController。
  */
-
 use std::{
     fs,
     path::Path,

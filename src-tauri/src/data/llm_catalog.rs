@@ -4,9 +4,9 @@
 use rusqlite::params;
 use serde::Serialize;
 
+use crate::agent_error::{AppError, AppResult};
 use crate::data::db::DbConn;
 use crate::data::settings::{ModelProvider, ModelServiceModel};
-use crate::agent_error::{AppError, AppResult};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

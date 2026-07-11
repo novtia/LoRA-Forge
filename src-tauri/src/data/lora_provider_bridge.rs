@@ -2,14 +2,11 @@
  * @file lora_provider_bridge.rs
  * @description 将 lora 项目的 LLM 供应商库合并进 Agent `Settings`，替代 agent.db 内独立供应商配置。
  */
-
 use rusqlite::Connection;
 
 use crate::agent_error::{AppError, AppResult};
 use crate::data::db::DbConn;
-use crate::data::settings::{
-    self, active_provider, ModelProvider, ModelServiceModel, Settings,
-};
+use crate::data::settings::{self, active_provider, ModelProvider, ModelServiceModel, Settings};
 use crate::domain::llm::EndpointKind;
 use crate::infra::db::repos::llm as lora_llm;
 
@@ -91,11 +88,7 @@ pub fn read_merged(agent_conn: &DbConn, lora_conn: &Connection) -> AppResult<Set
                 .map(|m| m.id.clone())
                 .unwrap_or_default()
         };
-        (
-            provider.endpoint.clone(),
-            provider.api_key.clone(),
-            model,
-        )
+        (provider.endpoint.clone(), provider.api_key.clone(), model)
     }) {
         settings.endpoint = endpoint;
         settings.api_key = api_key;
@@ -121,10 +114,7 @@ pub fn set_active_selection(
     Ok(())
 }
 
-fn normalize_openai_compat_endpoint(
-    sdk: &str,
-    endpoint_url: &str,
-) -> String {
+fn normalize_openai_compat_endpoint(sdk: &str, endpoint_url: &str) -> String {
     if crate::ai::providers::normalize_sdk(sdk) != crate::ai::providers::OPENAI_SDK {
         return endpoint_url.trim().to_string();
     }
@@ -141,8 +131,8 @@ fn normalize_openai_compat_endpoint(
 }
 
 fn lora_provider_to_model_provider(provider: &crate::domain::llm::LlmProvider) -> ModelProvider {
-    let has_credentials = !provider.endpoint_url.trim().is_empty()
-        && !provider.api_key.trim().is_empty();
+    let has_credentials =
+        !provider.endpoint_url.trim().is_empty() && !provider.api_key.trim().is_empty();
     let sdk = endpoint_kind_to_sdk(provider.endpoint_kind, &provider.endpoint_url);
     ModelProvider {
         id: provider.id.clone(),

@@ -2,7 +2,6 @@
  * @file infra/db/repos/baidu.rs
  * @description baidu_translate_settings 表 CRUD（单全局行）。
  */
-
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{error::AppResult, models::BaiduTranslateSettings};

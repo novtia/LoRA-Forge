@@ -1,4 +1,4 @@
-﻿//! LLM caption pipeline.
+//! LLM caption pipeline.
 //!
 //! 调用图
 //!
@@ -54,7 +54,6 @@ use prompt::{
 };
 
 const MAX_CAPTION_TOOL_ROUNDS: usize = 8;
-
 
 fn persist_model_as_text_only(log_sink: &AppState, model_id: &str) -> AppResult<()> {
     log_sink.with_db(|connection| crate::db::mark_model_text_only_in_global(connection, model_id))
@@ -123,15 +122,8 @@ pub async fn caption_for_dataset_image(
         CaptionTagMode::ConversationModify => {
             let instruction = user_message.map(str::trim).unwrap_or("");
             let caption = current_caption.map(str::trim).unwrap_or("");
-            modify_dataset_caption(
-                settings,
-                image_path,
-                caption,
-                instruction,
-                cancel,
-                log_sink,
-            )
-            .await
+            modify_dataset_caption(settings, image_path, caption, instruction, cancel, log_sink)
+                .await
         }
     }
 }
@@ -156,11 +148,7 @@ pub async fn generate_dataset_caption(
     let image_bytes = fs::read(image_path)?;
     let image_byte_count = image_bytes.len();
     let mime = mime_type_for_image(image_path);
-    let image_data_url = format!(
-        "data:{};base64,{}",
-        mime,
-        STANDARD.encode(&image_bytes)
-    );
+    let image_data_url = format!("data:{};base64,{}", mime, STANDARD.encode(&image_bytes));
     drop(image_bytes);
 
     // 上一张图: 仅当传入路径解析为可读文件时才编码 data URL；任一 IO 失败都静默降级（continue without prior turn）。
@@ -210,10 +198,7 @@ pub async fn generate_dataset_caption(
                     "warn",
                     format!(
                         "重试 caption {}/{} · 上次失败: {} · 等待 {}ms",
-                        attempt,
-                        max_extra_attempts,
-                        prev,
-                        sleep_ms
+                        attempt, max_extra_attempts, prev, sleep_ms
                     ),
                 );
             }
@@ -397,13 +382,25 @@ async fn caption_edit_instruction_once(
         st.push_api_log(
             "llm",
             "info",
-            format_llm_request_for_api_log(&request_body, kind, image_byte_count, mime, is_thinking),
+            format_llm_request_for_api_log(
+                &request_body,
+                kind,
+                image_byte_count,
+                mime,
+                is_thinking,
+            ),
         );
     }
 
-    let payload =
-        post_chat_completions(&endpoint, &request_body, &api_key, kind, cancel, log_sink.as_ref())
-            .await?;
+    let payload = post_chat_completions(
+        &endpoint,
+        &request_body,
+        &api_key,
+        kind,
+        cancel,
+        log_sink.as_ref(),
+    )
+    .await?;
 
     if let Some(refusal) = payload
         .pointer("/choices/0/message/refusal")
@@ -452,11 +449,7 @@ pub async fn modify_dataset_caption(
     let mime = mime_type_for_image(image_path);
     let image_bytes = fs::read(image_path)?;
     let image_byte_count = image_bytes.len();
-    let image_data_url = format!(
-        "data:{};base64,{}",
-        mime,
-        STANDARD.encode(&image_bytes)
-    );
+    let image_data_url = format!("data:{};base64,{}", mime, STANDARD.encode(&image_bytes));
     drop(image_bytes);
 
     let max_extra_attempts = settings.caption_retry_max;
@@ -570,8 +563,14 @@ async fn modify_dataset_caption_once(
             return Err(AppError::Cancelled);
         }
 
-        let request_body =
-            build_request_body_with_tools_inner(&model_id, &messages, settings, kind, is_thinking, &tools);
+        let request_body = build_request_body_with_tools_inner(
+            &model_id,
+            &messages,
+            settings,
+            kind,
+            is_thinking,
+            &tools,
+        );
 
         if let Some(ref st) = log_sink {
             if round == 0 {
@@ -739,9 +738,15 @@ async fn post_chat_completions(
                 st.push_api_log("llm", "error", format!("HTTP {} · {}", code, detail));
             }
             if code == 429 || (500..600).contains(&code) {
-                return Err(AppError::HttpServer { status: code, detail });
+                return Err(AppError::HttpServer {
+                    status: code,
+                    detail,
+                });
             }
-            return Err(AppError::HttpClient { status: code, detail });
+            return Err(AppError::HttpClient {
+                status: code,
+                detail,
+            });
         }
 
         let payload: Value = serde_json::from_str(&body).map_err(|err| {
@@ -759,11 +764,7 @@ async fn post_chat_completions(
                     .map(str::to_string)
                 {
                     if let Some(st) = log_sink {
-                        st.push_api_log(
-                            "llm",
-                            "error",
-                            format!("LLM payload error: {detail}"),
-                        );
+                        st.push_api_log("llm", "error", format!("LLM payload error: {detail}"));
                     }
                     return Err(AppError::HttpClient {
                         status: 200,
@@ -868,10 +869,14 @@ async fn generate_dataset_caption_once(
             PriorStrategy::TextOnlyConversation(prev.to_string())
         }
         (Some(prev), PriorCaptionMode::InjectAsAssistant) => match previous_image_data_url {
-            Some(prev_image) => PriorStrategy::FullConversation(prev.to_string(), prev_image.to_string()),
+            Some(prev_image) => {
+                PriorStrategy::FullConversation(prev.to_string(), prev_image.to_string())
+            }
             None => PriorStrategy::AssistantOnly(prev.to_string()),
         },
-        (Some(prev), PriorCaptionMode::InjectAsUserExample) => PriorStrategy::UserExample(prev.to_string()),
+        (Some(prev), PriorCaptionMode::InjectAsUserExample) => {
+            PriorStrategy::UserExample(prev.to_string())
+        }
         _ => PriorStrategy::None,
     };
 
@@ -1013,9 +1018,15 @@ async fn generate_dataset_caption_once(
                 st.push_api_log("llm", "error", format!("HTTP {} · {}", code, detail));
             }
             if code == 429 || (500..600).contains(&code) {
-                return Err(AppError::HttpServer { status: code, detail });
+                return Err(AppError::HttpServer {
+                    status: code,
+                    detail,
+                });
             }
-            return Err(AppError::HttpClient { status: code, detail });
+            return Err(AppError::HttpClient {
+                status: code,
+                detail,
+            });
         }
 
         let payload: Value = serde_json::from_str(&body).map_err(|err| {
@@ -1034,11 +1045,7 @@ async fn generate_dataset_caption_once(
                     .map(str::to_string)
                 {
                     if let Some(ref st) = log {
-                        st.push_api_log(
-                            "llm",
-                            "error",
-                            format!("LLM payload error: {detail}"),
-                        );
+                        st.push_api_log("llm", "error", format!("LLM payload error: {detail}"));
                     }
                     return Err(AppError::HttpClient {
                         status: 200,
@@ -1064,9 +1071,8 @@ async fn generate_dataset_caption_once(
 
         // finish_reason / native_finish_reason 命中过滤集合 → 立即失败
         if let Some(reason) = blocking_finish_reason(&payload) {
-            let msg = format!(
-                "LLM response was blocked by the provider's content filter ({reason})."
-            );
+            let msg =
+                format!("LLM response was blocked by the provider's content filter ({reason}).");
             if let Some(ref st) = log {
                 st.push_api_log("llm", "warn", msg.clone());
             }
@@ -1156,10 +1162,7 @@ fn build_request_body(
     } else {
         settings.temperature
     };
-    body.insert(
-        "temperature".to_string(),
-        json!(temperature),
-    );
+    body.insert("temperature".to_string(), json!(temperature));
 
     // max_tokens / max_completion_tokens 决策：
     //  * 思维模型：用 max_completion_tokens（>0 时）作为可见输出预算；同时把 max_tokens 放大为 mct + reasoning_budget
@@ -1176,7 +1179,9 @@ fn build_request_body(
         body.insert("max_tokens".to_string(), json!(total));
     } else if is_thinking {
         // 没有显式 max_completion_tokens：把 max_tokens 自动放大 reasoning_budget，避免思考耗尽
-        let expanded = settings.max_tokens.saturating_add(settings.reasoning_budget);
+        let expanded = settings
+            .max_tokens
+            .saturating_add(settings.reasoning_budget);
         body.insert("max_tokens".to_string(), json!(expanded));
     } else {
         body.insert("max_tokens".to_string(), json!(settings.max_tokens));
@@ -1188,7 +1193,6 @@ fn build_request_body(
 
     Value::Object(body)
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1330,13 +1334,19 @@ mod tests {
 
     #[test]
     fn http_client_4xx_not_retryable() {
-        let err = AppError::HttpClient { status: 401, detail: "bad key".to_string() };
+        let err = AppError::HttpClient {
+            status: 401,
+            detail: "bad key".to_string(),
+        };
         assert!(!err.is_retryable());
     }
 
     #[test]
     fn http_server_5xx_retryable() {
-        let err = AppError::HttpServer { status: 503, detail: "down".to_string() };
+        let err = AppError::HttpServer {
+            status: 503,
+            detail: "down".to_string(),
+        };
         assert!(err.is_retryable());
     }
 }

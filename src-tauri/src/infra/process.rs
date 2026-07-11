@@ -2,7 +2,6 @@
  * @file infra/process.rs
  * @description 通用进程派生、ID 生成、路径规范化、目录工具——纯 IO/字符串处理，不依赖业务。
  */
-
 use std::{
     cmp::Ordering,
     ffi::OsStr,
@@ -99,7 +98,9 @@ fn scan_ascii_u64(bytes: &[u8], start: usize) -> (u64, usize) {
     let mut i = start;
     let mut n: u64 = 0;
     while i < bytes.len() && bytes[i].is_ascii_digit() {
-        n = n.saturating_mul(10).saturating_add(u64::from(bytes[i] - b'0'));
+        n = n
+            .saturating_mul(10)
+            .saturating_add(u64::from(bytes[i] - b'0'));
         i += 1;
     }
     (n, i)

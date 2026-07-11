@@ -9,8 +9,10 @@ use crate::agent_error::AppResult;
 pub type DbPool = Pool<SqliteConnectionManager>;
 pub type DbConn = r2d2::PooledConnection<SqliteConnectionManager>;
 
-const MIGRATION_001: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations/001_init.sql"));
+const MIGRATION_001: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/migrations/001_init.sql"
+));
 const MIGRATION_002: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/migrations/002_session_system_prompt.sql"

@@ -2,7 +2,6 @@
  * @file commands/environment.rs
  * @description 训练环境管理命令：仓库列表/自定义增删、下载/更新/删除/取消（流式），以及本机环境只读巡检。
  */
-
 use tauri::{AppHandle, State};
 
 use crate::{

@@ -2,7 +2,6 @@
  * @file infra/db/mod.rs
  * @description DB 层入口：Schema 初始化（含增量迁移）、启动时恢复中断任务，对外暴露 repos。
  */
-
 pub mod repos;
 
 use rusqlite::{params, Connection};
@@ -147,7 +146,11 @@ fn ensure_job_logs_columns(connection: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-fn ensure_job_logs_column(connection: &Connection, column: &str, definition: &str) -> AppResult<()> {
+fn ensure_job_logs_column(
+    connection: &Connection,
+    column: &str,
+    definition: &str,
+) -> AppResult<()> {
     let mut statement = connection.prepare("PRAGMA table_info(job_logs)")?;
     let existing = statement
         .query_map([], |row| row.get::<_, String>(1))?

@@ -86,9 +86,7 @@ pub fn get_llm_provider(
     provider_id: String,
     state: State<'_, AppState>,
 ) -> Result<LlmProvider, String> {
-    respond(
-        state.with_db(|connection| llm_provider_db::get_llm_provider(connection, &provider_id)),
-    )
+    respond(state.with_db(|connection| llm_provider_db::get_llm_provider(connection, &provider_id)))
 }
 
 #[tauri::command]
@@ -130,9 +128,11 @@ pub fn delete_llm_provider(
     input: ProviderIdInput,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    respond(state.with_db(|connection| {
-        llm_provider_db::delete_llm_provider(connection, &input.provider_id)
-    }))
+    respond(
+        state.with_db(|connection| {
+            llm_provider_db::delete_llm_provider(connection, &input.provider_id)
+        }),
+    )
 }
 
 #[tauri::command]
@@ -146,7 +146,9 @@ pub fn add_llm_provider_model(
             &input.provider_id,
             &input.model_id,
             input.label.as_deref(),
-            input.source.unwrap_or(crate::models::LlmModelSource::Manual),
+            input
+                .source
+                .unwrap_or(crate::models::LlmModelSource::Manual),
         )
     }))
 }
@@ -173,11 +175,7 @@ pub fn delete_llm_provider_model(
     state: State<'_, AppState>,
 ) -> Result<LlmProvider, String> {
     respond(state.with_db(|connection| {
-        llm_provider_db::delete_llm_provider_model(
-            connection,
-            &input.provider_id,
-            &input.entry_id,
-        )
+        llm_provider_db::delete_llm_provider_model(connection, &input.provider_id, &input.entry_id)
     }))
 }
 
@@ -203,9 +201,8 @@ async fn fetch_llm_provider_models_inner(
     endpoint_url: Option<&str>,
     api_key: Option<&str>,
 ) -> AppResult<Vec<String>> {
-    let provider = state.with_db(|connection| {
-        llm_provider_db::get_llm_provider(connection, provider_id)
-    })?;
+    let provider =
+        state.with_db(|connection| llm_provider_db::get_llm_provider(connection, provider_id))?;
     let url = endpoint_url
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -220,10 +217,6 @@ pub fn set_active_llm_selection(
     state: State<'_, AppState>,
 ) -> Result<LlmGlobalSettings, String> {
     respond(state.with_db(|connection| {
-        llm_provider_db::set_active_llm_selection(
-            connection,
-            &input.provider_id,
-            &input.model_id,
-        )
+        llm_provider_db::set_active_llm_selection(connection, &input.provider_id, &input.model_id)
     }))
 }

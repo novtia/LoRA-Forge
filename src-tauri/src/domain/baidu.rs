@@ -2,7 +2,6 @@
  * @file domain/baidu.rs
  * @description 百度翻译接入凭据持久化结构。
  */
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

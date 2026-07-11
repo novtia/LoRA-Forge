@@ -7,11 +7,11 @@
 //! which adds task tracking, tool turns, and cancellation on top of the same
 //! provider call.
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::chat::{AttachmentBytes, ChatRequest, HistoryTurn, ProviderConfig};
 use crate::ai::parameters::GenerationParameters;
 use crate::ai::providers::{self, OPENAI_SDK};
 use crate::data::settings;
-use crate::agent_error::{AppError, AppResult};
 
 /**
  * OpenAI 兼容 SDK 的 endpoint 需补全 `/chat/completions`，与 lora 打标流程一致。

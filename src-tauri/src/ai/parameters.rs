@@ -151,11 +151,7 @@ impl GenerationParameters {
     }
 
     /// Route thinking/reasoning controls to the shape each upstream expects.
-    pub fn apply_thinking_params(
-        &self,
-        body: &mut Map<String, Value>,
-        endpoint: &str,
-    ) {
+    pub fn apply_thinking_params(&self, body: &mut Map<String, Value>, endpoint: &str) {
         if is_openrouter_endpoint(endpoint) {
             self.apply_openrouter_reasoning(body);
             return;

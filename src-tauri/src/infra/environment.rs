@@ -3,7 +3,6 @@
  * @description 本机环境只读巡检：探测 Python（Windows + WSL）、WSL 发行版、git、CUDA/驱动/GPU、磁盘空间。
  *   纯进程调用，不修改任何系统状态。
  */
-
 use serde_json::Value;
 
 use crate::{
@@ -157,7 +156,10 @@ fn detect_cuda() -> CudaInfo {
 
     if let Some(line) = cmd_output(
         "nvidia-smi",
-        &["--query-gpu=driver_version,name", "--format=csv,noheader,nounits"],
+        &[
+            "--query-gpu=driver_version,name",
+            "--format=csv,noheader,nounits",
+        ],
     ) {
         if let Some(first) = line.lines().next() {
             let mut parts = first.split(',').map(str::trim);

@@ -2,7 +2,6 @@
  * @file infra/state/api_log.rs
  * @description LLM / 外部 API 调用的内存环形日志（最近 400 条），供前端 system log 面板展示。
  */
-
 use std::{
     collections::VecDeque,
     sync::Mutex,

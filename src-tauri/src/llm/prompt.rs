@@ -2,15 +2,13 @@
  * @file llm/prompt.rs
  * @description Prompt 组装：Auto-tag 指令、对话修改指令、用户消息 content 构建、系统提示词解析。
  */
-
 use serde_json::{json, Value};
 
 use crate::models::{EndpointKind, LlmSettings};
 
 use super::http::{endpoint_kind_label, LOG_FIELD_TRUNCATE_CHARS};
 
-pub(crate) const DEFAULT_SYSTEM_PROMPT: &str =
-    include_str!("../../../prompts/system-prompt.en.md");
+pub(crate) const DEFAULT_SYSTEM_PROMPT: &str = include_str!("../../../prompts/system-prompt.en.md");
 
 pub(crate) const AUTO_TAG_PROMPT: &str = "Generate a concise, training-ready caption for this image for a Stable Diffusion or LoRA dataset. Return only a comma-separated Danbooru-style tag list with no preamble and no full sentences. Include subject, appearance, clothing, pose, framing, environment, and scene lighting when visible. Do NOT include art-style or medium tags (anime, realistic, sketch, cel_shading, monochrome, illustration, etc.), quality tags (masterpiece, best_quality, score_*), or artist names — the LoRA learns rendering from pixels. Keep it factual.";
 
@@ -158,7 +156,10 @@ pub(crate) fn format_llm_request_for_api_log(
     if let Some(model) = body.get("model") {
         compact.insert("model".to_string(), model.clone());
     }
-    compact.insert("endpoint_kind".to_string(), json!(endpoint_kind_label(kind)));
+    compact.insert(
+        "endpoint_kind".to_string(),
+        json!(endpoint_kind_label(kind)),
+    );
     compact.insert("is_thinking".to_string(), json!(is_thinking));
     compact.insert("has_image".to_string(), json!(image_bytes > 0));
     compact.insert("image_bytes".to_string(), json!(image_bytes));

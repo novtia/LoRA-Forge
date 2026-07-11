@@ -20,8 +20,7 @@ pub use crate::infra::db::repos::{
     jobs::{append_log, append_snapshot, create_job, get_active_job, update_job_status},
     llm::{
         mark_model_text_only_in_global,
-        resolve_effective_llm_settings_from_db as load_llm_settings,
-        save_llm_settings,
+        resolve_effective_llm_settings_from_db as load_llm_settings, save_llm_settings,
     },
     projects::{
         delete_project, get_project, insert_project, list_projects, update_project_record,

@@ -19,8 +19,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::ai::agent::types::AgentId;
 use crate::agent_error::AppResult;
+use crate::ai::agent::types::AgentId;
 
 /// Permission mode for a single tool invocation context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,9 +130,20 @@ pub const WRITE_TOOLS: &[&str] = &[
 /// Bash-prefix patterns that imply the command will mutate state. Used
 /// when [`PlanModeResolver`] sees a `Bash` invocation in Plan-mode.
 pub const BASH_WRITE_PREFIXES: &[&str] = &[
-    "mkdir ", "touch ", "rm ", "cp ", "mv ", "git add", "git commit",
-    "git push", "git reset", "npm install", "pip install", "cargo add",
-    "cargo install", "echo ",
+    "mkdir ",
+    "touch ",
+    "rm ",
+    "cp ",
+    "mv ",
+    "git add",
+    "git commit",
+    "git push",
+    "git reset",
+    "npm install",
+    "pip install",
+    "cargo add",
+    "cargo install",
+    "echo ",
 ];
 
 /// Wrapper resolver that enforces [`PermissionMode::Plan`] regardless of
@@ -163,7 +174,10 @@ impl<R: PermissionResolver> PermissionResolver for PlanModeResolver<R> {
 
         if matches!(request.mode, PermissionMode::Plan) {
             // 1) Direct write tool.
-            if WRITE_TOOLS.iter().any(|w| w.eq_ignore_ascii_case(request.tool_name)) {
+            if WRITE_TOOLS
+                .iter()
+                .any(|w| w.eq_ignore_ascii_case(request.tool_name))
+            {
                 return Ok(PermissionDecision::deny(format!(
                     "{} is blocked in plan-mode; only read-only exploration is allowed",
                     request.tool_name

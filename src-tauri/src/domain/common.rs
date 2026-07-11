@@ -2,7 +2,6 @@
  * @file domain/common.rs
  * @description 跨业务域共享的轻量类型：硬件信息、系统监控、外部 API 日志。
  */
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

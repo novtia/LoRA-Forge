@@ -22,6 +22,7 @@ import type {
   SampleImageEntry,
   SystemStats,
   TrainingConfig,
+  TrainingConfigPreview,
   TrainingEnvSettings,
   TrainingLogEvent,
   TrainingProgressEvent,
@@ -83,6 +84,20 @@ export function saveTrainingConfig(
       config,
     },
   });
+}
+
+export function previewSdScriptsConfig(
+  projectId: string,
+  config: TrainingConfig,
+): Promise<TrainingConfigPreview> {
+  return invoke("preview_sd_scripts_config", { projectId, config });
+}
+
+export function previewDiffusionPipeConfig(
+  projectId: string,
+  config: DiffusionPipeConfig,
+): Promise<TrainingConfigPreview> {
+  return invoke("preview_diffusion_pipe_config", { projectId, config });
 }
 
 export function loadTrainingEnv(): Promise<TrainingEnvSettings> {

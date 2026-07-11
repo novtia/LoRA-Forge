@@ -2,7 +2,6 @@
  * @file trainer/stats.rs
  * @description 系统硬件/GPU 运行时指标采集与定时推送（`system-stats-updated` Tauri 事件）。
  */
-
 use std::time::Duration;
 
 use sysinfo::System;
@@ -49,9 +48,12 @@ pub fn collect_system_stats(state: &AppState) -> SystemStats {
         .as_ref()
         .map(|m| m.gpu_util_percent)
         .unwrap_or_else(|| (cpu_usage * 1.4).clamp(12.0, 98.0));
-    let vram_used_gb = realtime_gpu.as_ref().map(|m| m.vram_used_gb).unwrap_or_else(|| {
-        estimate_vram_usage(vram_total_gb, used_memory, total_memory, &hardware)
-    });
+    let vram_used_gb = realtime_gpu
+        .as_ref()
+        .map(|m| m.vram_used_gb)
+        .unwrap_or_else(|| {
+            estimate_vram_usage(vram_total_gb, used_memory, total_memory, &hardware)
+        });
 
     SystemStats {
         cpu_percent: cpu_usage,
@@ -75,7 +77,11 @@ pub(super) fn estimate_vram_usage(
         return (vram_total_gb * 0.45).clamp(0.5, vram_total_gb);
     }
     let memory_ratio = (used_memory_gb / total_memory_gb).clamp(0.05, 0.95);
-    let baseline = if hardware.source == "nvidia-smi" { 0.18 } else { 0.12 };
+    let baseline = if hardware.source == "nvidia-smi" {
+        0.18
+    } else {
+        0.12
+    };
     (vram_total_gb * (baseline + memory_ratio * 0.42)).clamp(0.5, vram_total_gb)
 }
 

@@ -3,7 +3,6 @@
  * @description 训练仓库管理服务：精选目录、git 状态探测、clone/pull 流式任务（emit repo-task-*）、删除、取消。
  *   Windows 目标用原生 git；WSL 目标用 `wsl -d <distro> -- bash -lc "git …"`。
  */
-
 use std::{process::Stdio, sync::Arc};
 
 use tauri::{AppHandle, Emitter};
@@ -12,7 +11,10 @@ use tokio::io::{AsyncReadExt, BufReader};
 use crate::{
     db,
     error::{AppError, AppResult},
-    models::{CustomRepoInput, CustomRepoRecord, RepoTaskLogEvent, RepoTaskStateEvent, TrainingEnvSettings, TrainingRepoStatus},
+    models::{
+        CustomRepoInput, CustomRepoRecord, RepoTaskLogEvent, RepoTaskStateEvent,
+        TrainingEnvSettings, TrainingRepoStatus,
+    },
     state::{AppState, RepoTask},
     utils::{hidden_std_command, new_entity_id, now_ts},
 };
@@ -170,7 +172,10 @@ fn detect_git_status_wsl(path: &str, distro: &str) -> (bool, Option<String>, Opt
         Err(_) => return (false, None, None),
     };
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut lines = stdout.lines().map(str::trim).filter(|line| !line.is_empty());
+    let mut lines = stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
     match lines.next() {
         Some("INSTALLED") => {
             let branch = lines.next().map(|value| value.to_string());
@@ -235,14 +240,19 @@ pub fn resolve_repo(state: &AppState, repo_id: &str) -> AppResult<TrainingRepoSt
         .ok_or_else(|| AppError::NotFound(format!("Unknown training repo '{repo_id}'")))
 }
 
-pub fn add_custom_repo(state: &AppState, input: CustomRepoInput) -> AppResult<Vec<TrainingRepoStatus>> {
+pub fn add_custom_repo(
+    state: &AppState,
+    input: CustomRepoInput,
+) -> AppResult<Vec<TrainingRepoStatus>> {
     let name = input.name.trim();
     let url = input.git_url.trim();
     let target = input.target.trim();
     let path = input.install_path.trim();
 
     if name.is_empty() {
-        return Err(AppError::Validation("Repository name is required".to_string()));
+        return Err(AppError::Validation(
+            "Repository name is required".to_string(),
+        ));
     }
     if url.is_empty() {
         return Err(AppError::Validation("Git URL is required".to_string()));
@@ -310,12 +320,11 @@ fn build_task_command(
                     p = path_expr,
                     url = single_quote(&repo.git_url)
                 ),
-                "update" => format!(
-                    "P={p}; cd \"$P\" && git pull --progress",
-                    p = path_expr
-                ),
+                "update" => format!("P={p}; cd \"$P\" && git pull --progress", p = path_expr),
                 other => {
-                    return Err(AppError::Validation(format!("Unknown repo task kind '{other}'")))
+                    return Err(AppError::Validation(format!(
+                        "Unknown repo task kind '{other}'"
+                    )))
                 }
             };
             Ok(build_wsl_task_command(&env.wsl_distro, &script))
@@ -338,7 +347,9 @@ fn build_task_command(
                         .arg("--progress");
                 }
                 other => {
-                    return Err(AppError::Validation(format!("Unknown repo task kind '{other}'")))
+                    return Err(AppError::Validation(format!(
+                        "Unknown repo task kind '{other}'"
+                    )))
                 }
             }
             no_window(&mut command);
@@ -351,7 +362,14 @@ fn build_task_command(
 // Streaming task runner
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_state(app: &AppHandle, repo_id: &str, task_id: &str, kind: &str, status: &str, message: Option<String>) {
+fn emit_state(
+    app: &AppHandle,
+    repo_id: &str,
+    task_id: &str,
+    kind: &str,
+    status: &str,
+    message: Option<String>,
+) {
     let _ = app.emit(
         REPO_TASK_STATE_EVENT,
         RepoTaskStateEvent {
@@ -485,7 +503,14 @@ pub async fn start_repo_task(
             if wait_kind == "download" {
                 let _ = persist_install_path(&wait_state, &wait_repo);
             }
-            emit_state(&wait_app, &wait_repo.id, &wait_task_id, &wait_kind, "completed", None);
+            emit_state(
+                &wait_app,
+                &wait_repo.id,
+                &wait_task_id,
+                &wait_kind,
+                "completed",
+                None,
+            );
         } else {
             emit_state(
                 &wait_app,
@@ -531,7 +556,10 @@ pub async fn delete_repo(state: AppState, repo: TrainingRepoStatus) -> AppResult
     match repo.target.as_str() {
         "wsl" => {
             let env = state.with_db(db::load_training_env)?;
-            let script = format!("P={p}; rm -rf \"$P\"", p = bash_path_expr(&repo.install_path));
+            let script = format!(
+                "P={p}; rm -rf \"$P\"",
+                p = bash_path_expr(&repo.install_path)
+            );
             let mut command = build_wsl_task_command(&env.wsl_distro, &script);
             let status = command
                 .status()

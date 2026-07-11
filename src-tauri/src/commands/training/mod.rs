@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
 use crate::{
@@ -64,6 +64,106 @@ pub struct SaveDiffusionPipeConfigInput {
     pub config: DiffusionPipeConfig,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrainingConfigPreview {
+    pub main_toml: String,
+    pub dataset_toml: String,
+    pub command: String,
+}
+
+#[tauri::command]
+pub fn preview_sd_scripts_config(
+    project_id: String,
+    config: TrainingConfig,
+    state: State<'_, AppState>,
+) -> Result<TrainingConfigPreview, String> {
+    respond((|| {
+        let project = state.with_db(|connection| db::get_project(connection, &project_id))?;
+        let group_types =
+            state.with_db(|connection| db::load_dataset_group_types(connection, &project_id))?;
+        let dataset_toml =
+            trainer::sd_scripts::build_sd_scripts_dataset_toml(&project, &config, &group_types)?;
+        let dataset_path = state
+            .paths()
+            .jobs_dir
+            .join("preview.sd-scripts.dataset.toml");
+        let sample_path = state
+            .paths()
+            .jobs_dir
+            .join("preview.sd-scripts.sample-prompts.json");
+        let has_samples = config.sample_at_first
+            || config.sample_every_n_steps > 0
+            || config.sample_every_n_epochs > 0;
+        let main_toml = trainer::sd_scripts::build_sd_scripts_main_toml(
+            &project,
+            &config,
+            &dataset_path,
+            has_samples.then_some(sample_path.as_path()),
+        )?;
+        Ok(TrainingConfigPreview {
+            main_toml,
+            dataset_toml,
+            command: format!(
+                "{} -u {} --config_file {}",
+                "python",
+                config.training_script.trim(),
+                dataset_path
+                    .with_file_name("preview.sd-scripts.toml")
+                    .to_string_lossy()
+            ),
+        })
+    })())
+}
+
+#[tauri::command]
+pub fn preview_diffusion_pipe_config(
+    project_id: String,
+    config: DiffusionPipeConfig,
+    state: State<'_, AppState>,
+) -> Result<TrainingConfigPreview, String> {
+    respond((|| {
+        let project = state.with_db(|connection| db::get_project(connection, &project_id))?;
+        let group_types =
+            state.with_db(|connection| db::load_dataset_group_types(connection, &project_id))?;
+        let control_dirs =
+            state.with_db(|connection| db::load_dataset_control_dirs(connection, &project_id))?;
+        let dataset_toml = trainer::diffusion_pipe::build_diffusion_pipe_dataset_toml(
+            &project,
+            &config,
+            &group_types,
+            &control_dirs,
+        )?;
+        let dataset_path = state.paths().jobs_dir.join("preview.dp.dataset.toml");
+        let dataset_wsl =
+            trainer::diffusion_pipe::windows_path_to_wsl(&dataset_path.to_string_lossy());
+        let main_toml = trainer::diffusion_pipe::build_diffusion_pipe_main_toml(
+            &project,
+            &config,
+            &dataset_wsl,
+        );
+        let mut command = "deepspeed train.py --deepspeed --config preview.dp.toml".to_string();
+        if config.regenerate_cache {
+            command.push_str(" --regenerate_cache");
+        }
+        if config.trust_cache {
+            command.push_str(" --trust_cache");
+        }
+        if !config.resume_from_checkpoint.trim().is_empty() {
+            command.push_str(" --resume_from_checkpoint");
+            if config.resume_from_checkpoint.trim() != "latest" {
+                command.push(' ');
+                command.push_str(config.resume_from_checkpoint.trim());
+            }
+        }
+        Ok(TrainingConfigPreview {
+            main_toml,
+            dataset_toml,
+            command,
+        })
+    })())
+}
+
 #[tauri::command]
 pub async fn start_training(
     project_id: String,
@@ -106,7 +206,10 @@ pub fn get_latest_output_checkpoint(
     project_id: String,
     state: State<'_, AppState>,
 ) -> Result<Option<String>, String> {
-    respond(get_latest_output_checkpoint_inner(state.inner().clone(), &project_id))
+    respond(get_latest_output_checkpoint_inner(
+        state.inner().clone(),
+        &project_id,
+    ))
 }
 
 /// Points `network_weights` at the newest output checkpoint, clears `resume`, saves config, then starts training.
@@ -116,9 +219,7 @@ pub async fn start_training_from_latest_weights(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<ActiveJobSummary, String> {
-    respond(
-        start_training_from_latest_weights_inner(app, state.inner().clone(), &project_id).await,
-    )
+    respond(start_training_from_latest_weights_inner(app, state.inner().clone(), &project_id).await)
 }
 
 #[tauri::command]
@@ -133,7 +234,10 @@ pub fn export_checkpoint(
     ))
 }
 
-fn get_latest_output_checkpoint_inner(state: AppState, project_id: &str) -> AppResult<Option<String>> {
+fn get_latest_output_checkpoint_inner(
+    state: AppState,
+    project_id: &str,
+) -> AppResult<Option<String>> {
     let project = state.with_db(|connection| db::get_project(connection, project_id))?;
     let output_dir = PathBuf::from(&project.output_path);
     let latest = newest_file_with_extension(&output_dir, "safetensors")?;
@@ -205,7 +309,11 @@ pub fn save_diffusion_pipe_config(
     input: SaveDiffusionPipeConfigInput,
     state: State<'_, AppState>,
 ) -> Result<DiffusionPipeConfig, String> {
-    respond(save_diffusion_pipe_config_inner(state.inner().clone(), &input.project_id, input.config))
+    respond(save_diffusion_pipe_config_inner(
+        state.inner().clone(),
+        &input.project_id,
+        input.config,
+    ))
 }
 
 fn save_diffusion_pipe_config_inner(

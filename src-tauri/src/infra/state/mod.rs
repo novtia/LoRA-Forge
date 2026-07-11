@@ -2,7 +2,6 @@
  * @file infra/state/mod.rs
  * @description Tauri 进程范围内的全局可变状态容器：DB 连接池、运行中任务表、硬件信息、API 日志、LLM 取消标志。
  */
-
 pub mod api_log;
 pub mod runtime_job;
 

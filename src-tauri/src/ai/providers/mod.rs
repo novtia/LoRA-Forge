@@ -9,8 +9,8 @@ mod gemini;
 mod grok;
 mod openai;
 
-use crate::ai::chat::{ChatRequest, GenerateResponse, TextDeltaCallback};
 use crate::agent_error::{AppError, AppResult};
+use crate::ai::chat::{ChatRequest, GenerateResponse, TextDeltaCallback};
 
 pub const OPENAI_SDK: &str = "openai";
 pub const OPENAI_RESPONSES_SDK: &str = "openai-responses";

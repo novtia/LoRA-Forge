@@ -27,13 +27,7 @@ pub const AGENT_FORK: &str = "fork";
 /// Tool names that are unsafe for read-only agents (Explore / Plan /
 /// Verification). Kept in one place so adding a write-tool only needs a
 /// single edit.
-const WRITE_TOOLS: &[&str] = &[
-    "Edit",
-    "Write",
-    "NotebookEdit",
-    "ExitPlanMode",
-    "TodoList",
-];
+const WRITE_TOOLS: &[&str] = &["Edit", "Write", "NotebookEdit", "ExitPlanMode", "TodoList"];
 
 fn read_only_deny() -> Vec<String> {
     let mut v: Vec<String> = WRITE_TOOLS.iter().map(|s| s.to_string()).collect();

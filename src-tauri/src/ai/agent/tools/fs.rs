@@ -21,8 +21,8 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 use crate::agent_error::{AppError, AppResult};
+use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 
 const TOOL_NAME: &str = "Read";
 

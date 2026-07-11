@@ -1,8 +1,7 @@
-﻿/**
+/**
  * @file commands/dataset/batch.rs
  * @description 批量操作命令：`batch_rename_dataset_images`、`batch_convert_dataset_extensions`。
  */
-
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -21,11 +20,12 @@ use crate::{
 
 use std::collections::HashMap;
 
-use super::{
-    BatchConvertDatasetExtensionsInput, BatchRenameDatasetImagesInput, caption_path_for_image, resolve_dataset_path,
-};
 use super::browse::list_dataset_entries_inner;
 use super::group::{parent_relative_path, resolve_dataset_parent_dir, sanitize_group_segment};
+use super::{
+    caption_path_for_image, resolve_dataset_path, BatchConvertDatasetExtensionsInput,
+    BatchRenameDatasetImagesInput,
+};
 
 #[tauri::command]
 pub fn batch_rename_dataset_images(
@@ -185,12 +185,7 @@ fn batch_rename_dataset_images_inner(
                 .parent()
                 .ok_or_else(|| AppError::Validation(format!("Invalid path '{old_relative}'")))?;
             let temp_path = parent.join(temp_name);
-            rename_image_with_caption(
-                &dataset_root,
-                &canonical_dataset_root,
-                &source,
-                &temp_path,
-            )?;
+            rename_image_with_caption(&dataset_root, &canonical_dataset_root, &source, &temp_path)?;
         }
 
         for (old_relative, temp_name, final_name) in plans {
@@ -245,11 +240,7 @@ fn extensions_equivalent(left: &str, right: &str) -> bool {
     normalize(left) == normalize(right)
 }
 
-fn save_image_as_format(
-    source: &Path,
-    dest: &Path,
-    target_extension: &str,
-) -> AppResult<()> {
+fn save_image_as_format(source: &Path, dest: &Path, target_extension: &str) -> AppResult<()> {
     use image::ImageFormat;
 
     let img = open_dataset_image(source)?;
@@ -267,14 +258,9 @@ fn save_image_as_format(
 
     if format == ImageFormat::Jpeg {
         let rgb = img.to_rgb8();
-        let mut buffer = std::io::BufWriter::new(
-            fs::File::create(dest).map_err(|error| {
-                AppError::Validation(format!(
-                    "Failed to create '{}': {error}",
-                    dest.display()
-                ))
-            })?,
-        );
+        let mut buffer = std::io::BufWriter::new(fs::File::create(dest).map_err(|error| {
+            AppError::Validation(format!("Failed to create '{}': {error}", dest.display()))
+        })?);
         let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buffer, 95);
         encoder
             .encode(
@@ -291,10 +277,7 @@ fn save_image_as_format(
             })?;
     } else {
         img.save_with_format(dest, format).map_err(|error| {
-            AppError::Validation(format!(
-                "Failed to write '{}': {error}",
-                dest.display()
-            ))
+            AppError::Validation(format!("Failed to write '{}': {error}", dest.display()))
         })?;
     }
 

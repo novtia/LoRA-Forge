@@ -131,7 +131,11 @@ fn tags_from_arg(value: Option<&Value>) -> Vec<String> {
 }
 
 /// Apply a single tool call to `caption`. Returns `(new_caption, error_message)`.
-pub fn apply_caption_tool_call(caption: &str, name: &str, arguments: &str) -> (String, Option<String>) {
+pub fn apply_caption_tool_call(
+    caption: &str,
+    name: &str,
+    arguments: &str,
+) -> (String, Option<String>) {
     let args: Value = match serde_json::from_str(arguments) {
         Ok(v) => v,
         Err(err) => {
@@ -149,7 +153,10 @@ pub fn apply_caption_tool_call(caption: &str, name: &str, arguments: &str) -> (S
         "add_tags" => {
             let to_add = tags_from_arg(args.get("tags"));
             if to_add.is_empty() {
-                return (caption.to_string(), Some("add_tags: tags is empty".to_string()));
+                return (
+                    caption.to_string(),
+                    Some("add_tags: tags is empty".to_string()),
+                );
             }
             let pos = parse_position(args.get("position"), tags.len());
             for (i, tag) in to_add.into_iter().enumerate() {
@@ -217,10 +224,7 @@ pub fn apply_caption_tool_call(caption: &str, name: &str, arguments: &str) -> (S
             return (text.to_string(), None);
         }
         other => {
-            return (
-                caption.to_string(),
-                Some(format!("unknown tool: {other}")),
-            );
+            return (caption.to_string(), Some(format!("unknown tool: {other}")));
         }
     }
 
@@ -273,8 +277,11 @@ mod tests {
 
     #[test]
     fn add_tags_at_front() {
-        let (out, _) =
-            apply_caption_tool_call("1girl, solo", "add_tags", r#"{"tags":"masterpiece","position":0}"#);
+        let (out, _) = apply_caption_tool_call(
+            "1girl, solo",
+            "add_tags",
+            r#"{"tags":"masterpiece","position":0}"#,
+        );
         assert_eq!(out, "masterpiece, 1girl, solo");
     }
 

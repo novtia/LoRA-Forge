@@ -13,8 +13,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
-use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 use crate::agent_error::{AppError, AppResult};
+use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 
 const WRITE_TOOL: &str = "Write";
 const EDIT_TOOL: &str = "Edit";
@@ -83,9 +83,8 @@ impl Tool for FileWriteTool {
 
             if let Some(parent) = path.parent() {
                 if !parent.as_os_str().is_empty() {
-                    std::fs::create_dir_all(parent).map_err(|e| {
-                        AppError::Other(format!("Write: mkdir {:?}: {e}", parent))
-                    })?;
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| AppError::Other(format!("Write: mkdir {:?}: {e}", parent)))?;
                 }
             }
             std::fs::write(&path, content.as_bytes())
@@ -227,7 +226,9 @@ fn require_nonempty_string(input: &Value, key: &str, tool: &str) -> AppResult<()
         .and_then(Value::as_str)
         .ok_or_else(|| AppError::Invalid(format!("{tool}: `{key}` must be a string")))?;
     if v.is_empty() {
-        return Err(AppError::Invalid(format!("{tool}: `{key}` must be non-empty")));
+        return Err(AppError::Invalid(format!(
+            "{tool}: `{key}` must be non-empty"
+        )));
     }
     Ok(())
 }

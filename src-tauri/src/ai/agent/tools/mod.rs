@@ -30,10 +30,10 @@ use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::agent::core::context::ToolUseContext;
 use crate::ai::agent::core::permission::{PermissionDecision, PermissionRequest};
 use crate::ai::agent::types::MessageId;
-use crate::agent_error::{AppError, AppResult};
 
 /// Static description of a tool. The model-facing schema lives in `schema`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -174,7 +174,11 @@ impl ToolPool {
         let Ok(tools_guard) = self.tools.lock() else {
             return HashMap::new();
         };
-        let global_deny = self.global_deny.lock().map(|g| g.clone()).unwrap_or_default();
+        let global_deny = self
+            .global_deny
+            .lock()
+            .map(|g| g.clone())
+            .unwrap_or_default();
         let wildcard = allow.iter().any(|t| t == "*");
         let allow_set: std::collections::HashSet<&String> = allow.iter().collect();
         let deny_set: std::collections::HashSet<&String> =

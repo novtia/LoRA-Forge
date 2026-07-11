@@ -3,7 +3,6 @@
  * @description 训练日志解析：结构化日志（`@@LORA_FORGE_LOG@@` 前缀）、sd-scripts tqdm 进度行、
  *   deepspeed 进度行、日志级别规范化等。
  */
-
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -88,7 +87,11 @@ pub(super) fn metric_as_f64(metrics: &Map<String, Value>, key: &str) -> Option<f
 }
 
 pub(super) fn serialize_metrics(metrics: &Map<String, Value>) -> Option<String> {
-    if metrics.is_empty() { None } else { serde_json::to_string(metrics).ok() }
+    if metrics.is_empty() {
+        None
+    } else {
+        serde_json::to_string(metrics).ok()
+    }
 }
 
 pub(super) fn parse_progress_line(line: &str) -> Option<ParsedProgress> {
@@ -118,14 +121,19 @@ pub(super) fn parse_progress_line(line: &str) -> Option<ParsedProgress> {
     }
     if let Some(epoch_token) = line.strip_prefix("epoch ") {
         let (cur, tot) = parse_pair(epoch_token.trim())?;
-        return Some(ParsedProgress { epoch: Some(cur), epoch_total: Some(tot), ..ParsedProgress::default() });
+        return Some(ParsedProgress {
+            epoch: Some(cur),
+            epoch_total: Some(tot),
+            ..ParsedProgress::default()
+        });
     }
     if line.contains("steps:") {
         let (step, step_total) = find_numeric_pair(line)?;
         return Some(ParsedProgress {
             step: Some(step),
             step_total: Some(step_total),
-            loss: extract_float_after(line, "avr_loss=").or_else(|| extract_float_after(line, "loss=")),
+            loss: extract_float_after(line, "avr_loss=")
+                .or_else(|| extract_float_after(line, "loss=")),
             ..ParsedProgress::default()
         });
     }
@@ -134,10 +142,16 @@ pub(super) fn parse_progress_line(line: &str) -> Option<ParsedProgress> {
 
 pub(super) fn parse_deepspeed_progress_line(line: &str) -> Option<ParsedProgress> {
     if let Some(rest) = line.strip_prefix("steps: ") {
-        let step_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+        let step_end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
         let step: Option<u32> = rest[..step_end].parse().ok();
         if step.is_some() {
-            return Some(ParsedProgress { step, loss: extract_float_after(rest, "loss: "), ..ParsedProgress::default() });
+            return Some(ParsedProgress {
+                step,
+                loss: extract_float_after(rest, "loss: "),
+                ..ParsedProgress::default()
+            });
         }
     }
     if line.contains("step=") && line.contains("lr=") {
@@ -148,7 +162,12 @@ pub(super) fn parse_deepspeed_progress_line(line: &str) -> Option<ParsedProgress
                 parsed.step = val.trim().parse().ok();
             } else if let Some(val) = token.strip_prefix("lr=") {
                 let lr_str = val.trim().trim_start_matches('[');
-                let first = lr_str.split(',').next().unwrap_or("").trim().trim_end_matches(']');
+                let first = lr_str
+                    .split(',')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .trim_end_matches(']');
                 parsed.lr = first.parse().ok();
             }
         }
@@ -158,7 +177,10 @@ pub(super) fn parse_deepspeed_progress_line(line: &str) -> Option<ParsedProgress
     }
     if let Some(epoch_str) = line.strip_prefix("Started new epoch: ") {
         let epoch: u32 = epoch_str.trim().parse().ok()?;
-        return Some(ParsedProgress { epoch: Some(epoch), ..ParsedProgress::default() });
+        return Some(ParsedProgress {
+            epoch: Some(epoch),
+            ..ParsedProgress::default()
+        });
     }
     None
 }
@@ -172,15 +194,26 @@ pub(super) fn find_numeric_pair(value: &str) -> Option<(u32, u32)> {
     let bytes = value.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if !bytes[i].is_ascii_digit() { i += 1; continue; }
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
         let start = i;
-        while i < bytes.len() && bytes[i].is_ascii_digit() { i += 1; }
-        if i >= bytes.len() || bytes[i] != b'/' { continue; }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'/' {
+            continue;
+        }
         let left = value[start..i].parse().ok()?;
         i += 1;
         let right_start = i;
-        while i < bytes.len() && bytes[i].is_ascii_digit() { i += 1; }
-        if right_start == i { continue; }
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        if right_start == i {
+            continue;
+        }
         let right = value[right_start..i].parse().ok()?;
         return Some((left, right));
     }
@@ -190,7 +223,9 @@ pub(super) fn find_numeric_pair(value: &str) -> Option<(u32, u32)> {
 pub(super) fn extract_float_after(value: &str, marker: &str) -> Option<f64> {
     let start = value.find(marker)? + marker.len();
     let tail = &value[start..];
-    let end = tail.find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E'))).unwrap_or(tail.len());
+    let end = tail
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+        .unwrap_or(tail.len());
     tail[..end].parse().ok()
 }
 
@@ -209,7 +244,10 @@ pub(super) fn infer_log_level(line: &str) -> String {
         "error".to_string()
     } else if lowered.contains("warn") || lowered.contains("disk space") {
         "warn".to_string()
-    } else if lowered.contains("checkpoint") || lowered.contains("complete") || lowered.contains("saved.") {
+    } else if lowered.contains("checkpoint")
+        || lowered.contains("complete")
+        || lowered.contains("saved.")
+    {
         "success".to_string()
     } else {
         "info".to_string()

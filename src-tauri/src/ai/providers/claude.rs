@@ -1,10 +1,10 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Map, Value};
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::chat::{AttachmentBytes, ChatRequest, GenerateResponse, HistoryTurn};
 use crate::ai::providers::{ChatProvider, ProviderFuture, CLAUDE_SDK};
 use crate::ai::tokens::TokenUsage;
-use crate::agent_error::{AppError, AppResult};
 
 const UPSTREAM_TIMEOUT_SECS: u64 = 15 * 60;
 const ANTHROPIC_VERSION: &str = "2023-06-01";
@@ -84,7 +84,12 @@ fn build_body(request: &ChatRequest) -> Value {
     // call/response symmetry.
     if let Some(pending) = &request.pending_assistant_turn {
         let mut content: Vec<Value> = Vec::new();
-        if let Some(text) = pending.text.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(text) = pending
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             content.push(json!({ "type": "text", "text": text }));
         }
         for tc in &pending.tool_calls {
@@ -114,7 +119,9 @@ fn build_body(request: &ChatRequest) -> Value {
                     "content": content,
                 });
                 if tr.is_error {
-                    b.as_object_mut().unwrap().insert("is_error".into(), Value::Bool(true));
+                    b.as_object_mut()
+                        .unwrap()
+                        .insert("is_error".into(), Value::Bool(true));
                 }
                 b
             })

@@ -2,12 +2,12 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::tokens;
 use crate::data::db::{now_ms, DbConn};
 use crate::data::settings::{
     validate_model_param_settings, ModelParamSettings, DEFAULT_HISTORY_TURNS,
 };
-use crate::agent_error::{AppError, AppResult};
 
 fn decode_llm_params(raw: Option<String>) -> ModelParamSettings {
     raw.and_then(|s| serde_json::from_str(&s).ok())
@@ -245,7 +245,8 @@ pub fn recompute_context_window_used(conn: &DbConn, session_id: &str) -> AppResu
             // turn.  This gives a realistic "how much context is occupied"
             // reading.  Fall back to prompt_tokens for providers that only
             // expose the input side.
-            let t = u.total_tokens
+            let t = u
+                .total_tokens
                 .filter(|x| *x > 0)
                 .or_else(|| u.prompt_tokens.filter(|x| *x > 0));
             if let Some(t) = t {
@@ -283,12 +284,13 @@ pub fn update_message_params(conn: &DbConn, id: &str, params_json: &str) -> AppR
 
 /// Returns image rel_paths (and thumb rel_paths) that should be cleaned from disk.
 pub fn delete_message(conn: &DbConn, id: &str) -> AppResult<Vec<(String, Option<String>)>> {
-    let session_id: String = conn.query_row(
-        "SELECT session_id FROM messages WHERE id=?1",
-        params![id],
-        |r| r.get(0),
-    )
-    .map_err(|_| AppError::NotFound(format!("message {id}")))?;
+    let session_id: String = conn
+        .query_row(
+            "SELECT session_id FROM messages WHERE id=?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|_| AppError::NotFound(format!("message {id}")))?;
     let mut stmt =
         conn.prepare("SELECT rel_path, thumb_path FROM message_images WHERE message_id=?1")?;
     let rows = stmt.query_map(params![id], |r| {

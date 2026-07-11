@@ -2,7 +2,6 @@
  * @file domain/project.rs
  * @description 项目领域类型：`ProjectStatus` 状态机 + `ProjectRecord` 持久化模型。
  */
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

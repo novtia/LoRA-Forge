@@ -1,10 +1,10 @@
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Map, Value};
 
+use crate::agent_error::{AppError, AppResult};
 use crate::ai::chat::{AttachmentBytes, ChatRequest, GenerateResponse, HistoryTurn, ImageResult};
 use crate::ai::providers::{ChatProvider, ProviderFuture, GEMINI_SDK};
 use crate::ai::tokens::TokenUsage;
-use crate::agent_error::{AppError, AppResult};
 
 const UPSTREAM_TIMEOUT_SECS: u64 = 15 * 60;
 
@@ -96,7 +96,12 @@ fn build_body(request: &ChatRequest) -> Value {
     // Gemini sees a complete call/response chain.
     if let Some(pending) = &request.pending_assistant_turn {
         let mut parts: Vec<Value> = Vec::new();
-        if let Some(text) = pending.text.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(text) = pending
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             parts.push(json!({ "text": text }));
         }
         for tc in &pending.tool_calls {
@@ -260,7 +265,11 @@ fn parse_response(txt: &str) -> AppResult<GenerateResponse> {
                 images.push(image);
             }
             if let Some(fc) = part.get("functionCall") {
-                let name = fc.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+                let name = fc
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
                 if name.is_empty() {
                     continue;
                 }

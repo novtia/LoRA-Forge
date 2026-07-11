@@ -2,14 +2,13 @@
  * @file infra/db/repos/training_repos.rs
  * @description training_repos 表 CRUD：持久化用户自定义训练仓库定义（git URL / target / 安装路径）。
  */
-
 use rusqlite::{params, Connection};
 
 use crate::{error::AppResult, models::CustomRepoRecord, utils::now_ts};
 
 pub fn list_custom_repos(connection: &Connection) -> AppResult<Vec<CustomRepoRecord>> {
-    let mut statement = connection
-        .prepare("SELECT config_json FROM training_repos ORDER BY created_at ASC")?;
+    let mut statement =
+        connection.prepare("SELECT config_json FROM training_repos ORDER BY created_at ASC")?;
     let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
     let mut repos = Vec::new();
     for row in rows {

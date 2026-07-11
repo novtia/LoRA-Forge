@@ -20,8 +20,8 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::ai::agent::memory::{MemoryFile, MemoryType, UserContext, UserContextLoader};
 use crate::agent_error::AppResult;
+use crate::ai::agent::memory::{MemoryFile, MemoryType, UserContext, UserContextLoader};
 
 const MAX_INCLUDE_DEPTH: u8 = 5;
 const RULE_EXTENSION: &str = "md";
@@ -364,7 +364,9 @@ fn expand_includes(
         }
         let candidate = resolve_include_path(rest.trim(), parent, config);
         let Some(target) = candidate else { continue };
-        let Ok(canon) = target.canonicalize() else { continue };
+        let Ok(canon) = target.canonicalize() else {
+            continue;
+        };
         if !visited.insert(canon.clone()) {
             continue;
         }

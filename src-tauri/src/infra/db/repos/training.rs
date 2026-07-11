@@ -2,7 +2,6 @@
  * @file infra/db/repos/training.rs
  * @description training_configs / training_env_settings / diffusion_pipe_configs 表 CRUD。
  */
-
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::{

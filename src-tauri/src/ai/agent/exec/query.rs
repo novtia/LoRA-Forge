@@ -11,12 +11,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
+use crate::agent_error::AppResult;
 use crate::ai::agent::core::attachment::Attachment;
 use crate::ai::agent::core::context::ToolUseContext;
 use crate::ai::agent::tools::ToolPool;
 use crate::ai::agent::types::{MessageEvent, QuerySource, TokenUsage};
 use crate::ai::chat::{ChatRequest, TextDeltaCallback};
-use crate::agent_error::AppResult;
 
 /// Callback invoked the moment a `tool_use` / `tool_result` event is
 /// recorded in the engine. Mirrors [`TextDeltaCallback`] but for the

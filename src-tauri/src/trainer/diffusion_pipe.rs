@@ -1,13 +1,8 @@
-﻿/**
+/**
  * @file trainer/diffusion_pipe.rs
  * @description diffusion-pipe WSL 训练器：WSL 路径转换、TOML 配置文件生成、命令构建、`start_diffusion_pipe_training`。
  */
-
-use std::{
-    fs,
-    path::PathBuf,
-    process::Stdio,
-};
+use std::{fs, path::PathBuf, process::Stdio};
 
 use tauri::AppHandle;
 
@@ -15,18 +10,18 @@ use crate::{
     db,
     error::{AppError, AppResult},
     models::{
-        ActiveJobSummary, DiffusionPipeConfig, JobStatus, ProjectRecord,
-        ProjectStatus, TrainingEnvSettings, TrainingSnapshot,
+        ActiveJobSummary, DiffusionPipeConfig, JobStatus, ProjectRecord, ProjectStatus,
+        TrainingEnvSettings, TrainingSnapshot,
     },
     state::{AppState, RuntimeJob, RuntimeJobControlMode},
     utils::now_ts,
 };
 
+use super::sd_scripts::{collect_dataset_image_dirs, toml_string};
 use super::{
-    bash_shell_quote, emit_state_change, finalize_job, final_status_after_exit,
+    bash_shell_quote, emit_state_change, final_status_after_exit, finalize_job,
     format_training_invocation, open_project_log_file, stream_logs, wait_for_child,
 };
-use super::sd_scripts::{collect_dataset_image_dirs, toml_string};
 // diffusion-pipe WSL training support
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -69,6 +64,17 @@ fn write_diffusion_pipe_dataset_toml(
     group_types: &std::collections::HashMap<String, String>,
     control_dirs: &std::collections::HashMap<String, String>,
 ) -> AppResult<()> {
+    let toml = build_diffusion_pipe_dataset_toml(project, config, group_types, control_dirs)?;
+    fs::write(destination, toml)?;
+    Ok(())
+}
+
+pub fn build_diffusion_pipe_dataset_toml(
+    project: &ProjectRecord,
+    config: &DiffusionPipeConfig,
+    group_types: &std::collections::HashMap<String, String>,
+    control_dirs: &std::collections::HashMap<String, String>,
+) -> AppResult<String> {
     let dataset_wsl = windows_path_to_wsl(&project.dataset_path);
     let resolutions = config.dataset_resolutions.trim();
     let frame_buckets = config.frame_buckets.trim();
@@ -76,7 +82,11 @@ fn write_diffusion_pipe_dataset_toml(
     let mut toml = String::new();
 
     // resolutions
-    let res_parts: Vec<&str> = resolutions.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    let res_parts: Vec<&str> = resolutions
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if res_parts.len() == 1 {
         toml.push_str(&format!("resolutions = [{}]\n", res_parts[0]));
     } else if res_parts.len() > 1 {
@@ -88,17 +98,39 @@ fn write_diffusion_pipe_dataset_toml(
 
     if config.enable_ar_bucket {
         toml.push_str("enable_ar_bucket = true\n");
-        toml.push_str("min_ar = 0.5\n");
-        toml.push_str("max_ar = 2.0\n");
+        if config.ar_buckets.trim().is_empty() {
+            toml.push_str(&format!("min_ar = {}\n", config.min_ar.trim()));
+            toml.push_str(&format!("max_ar = {}\n", config.max_ar.trim()));
+        } else {
+            toml.push_str(&format!("ar_buckets = [{}]\n", config.ar_buckets.trim()));
+        }
         toml.push_str(&format!("num_ar_buckets = {}\n", config.num_ar_buckets));
     }
 
     // frame buckets
-    let fb_parts: Vec<&str> = frame_buckets.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+    let fb_parts: Vec<&str> = frame_buckets
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
     if !fb_parts.is_empty() {
         let joined = fb_parts.join(", ");
         toml.push_str(&format!("frame_buckets = [{joined}]\n"));
     }
+    if config.cache_shuffle_num > 0 {
+        toml.push_str(&format!(
+            "cache_shuffle_num = {}\n",
+            config.cache_shuffle_num
+        ));
+        toml.push_str(&format!(
+            "cache_shuffle_delimiter = {}\n",
+            toml_string(&config.cache_shuffle_delimiter)
+        ));
+    }
+    toml.push_str(&format!(
+        "skip_empty_caption = {}\n",
+        config.skip_empty_caption
+    ));
 
     // Collect all leaf directories that actually contain images.
     // This mirrors how sd-scripts recurses into @N_triggerword subdirectories.
@@ -120,8 +152,10 @@ fn write_diffusion_pipe_dataset_toml(
     // Directories registered as control (reference) targets are emitted via the
     // matching target's `control_path`, so they must not appear as standalone
     // `[[directory]]` blocks of their own.
-    let control_rel_set: std::collections::HashSet<String> =
-        control_dirs.values().map(|v| v.trim_matches('/').to_string()).collect();
+    let control_rel_set: std::collections::HashSet<String> = control_dirs
+        .values()
+        .map(|v| v.trim_matches('/').to_string())
+        .collect();
 
     // Filter out regularization directories (diffusion-pipe has no is_reg concept)
     // and any directory that is itself a control/reference directory.
@@ -150,18 +184,22 @@ fn write_diffusion_pipe_dataset_toml(
             toml.push_str("[[directory]]\n");
             toml.push_str(&format!("path = {}\n", toml_string(&dir_wsl)));
             toml.push_str(&format!("num_repeats = {}\n", config.num_repeats));
+            if !config.mask_path.trim().is_empty() {
+                let mask_wsl = windows_path_to_wsl(&config.mask_path);
+                toml.push_str(&format!("mask_path = {}\n", toml_string(&mask_wsl)));
+            }
             // Edit training: if this target dir has a registered control directory,
             // emit `control_path` so diffusion-pipe pairs same-stem reference images.
             if let Some(control_rel) = control_dirs.get(&rel) {
-                let control_win = dataset_win.join(control_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+                let control_win =
+                    dataset_win.join(control_rel.replace('/', std::path::MAIN_SEPARATOR_STR));
                 let control_wsl = windows_path_to_wsl(&control_win.to_string_lossy());
                 toml.push_str(&format!("control_path = {}\n", toml_string(&control_wsl)));
             }
         }
     }
 
-    fs::write(destination, toml)?;
-    Ok(())
+    Ok(toml)
 }
 
 fn write_diffusion_pipe_main_toml(
@@ -170,19 +208,44 @@ fn write_diffusion_pipe_main_toml(
     dataset_toml_wsl_path: &str,
     destination: &std::path::Path,
 ) -> AppResult<()> {
+    let toml = build_diffusion_pipe_main_toml(project, config, dataset_toml_wsl_path);
+    fs::write(destination, toml)?;
+    Ok(())
+}
+
+pub fn build_diffusion_pipe_main_toml(
+    project: &ProjectRecord,
+    config: &DiffusionPipeConfig,
+    dataset_toml_wsl_path: &str,
+) -> String {
     let output_wsl = windows_path_to_wsl(&project.output_path);
     let mut toml = String::new();
 
     toml.push_str(&format!("output_dir = {}\n", toml_string(&output_wsl)));
-    toml.push_str(&format!("dataset = {}\n\n", toml_string(dataset_toml_wsl_path)));
+    toml.push_str(&format!(
+        "dataset = {}\n\n",
+        toml_string(dataset_toml_wsl_path)
+    ));
 
     toml.push_str(&format!("epochs = {}\n", config.epochs));
     if config.max_steps > 0 {
         toml.push_str(&format!("max_steps = {}\n", config.max_steps));
     }
-    toml.push_str(&format!("micro_batch_size_per_gpu = {}\n", config.micro_batch_size_per_gpu));
-    toml.push_str(&format!("pipeline_stages = 1\n"));
-    toml.push_str(&format!("gradient_accumulation_steps = {}\n", config.gradient_accumulation_steps));
+    toml.push_str(&format!(
+        "micro_batch_size_per_gpu = {}\n",
+        config.micro_batch_size_per_gpu
+    ));
+    toml.push_str("pipeline_stages = 1\n");
+    toml.push_str(&format!(
+        "gradient_accumulation_steps = {}\n",
+        config.gradient_accumulation_steps
+    ));
+    if config.image_micro_batch_size_per_gpu > 0 {
+        toml.push_str(&format!(
+            "image_micro_batch_size_per_gpu = {}\n",
+            config.image_micro_batch_size_per_gpu
+        ));
+    }
 
     let gc = config.gradient_clipping.trim();
     if !gc.is_empty() {
@@ -191,20 +254,102 @@ fn write_diffusion_pipe_main_toml(
     if config.warmup_steps > 0 {
         toml.push_str(&format!("warmup_steps = {}\n", config.warmup_steps));
     }
+    if !config.force_constant_lr.trim().is_empty() {
+        toml.push_str(&format!(
+            "force_constant_lr = {}\n",
+            config.force_constant_lr.trim()
+        ));
+    }
+    if !config.lr_scheduler.trim().is_empty() {
+        toml.push_str(&format!(
+            "lr_scheduler = {}\n",
+            toml_single_quoted(&config.lr_scheduler)
+        ));
+    }
+    if !config.pseudo_huber_c.trim().is_empty() {
+        toml.push_str(&format!(
+            "pseudo_huber_c = {}\n",
+            config.pseudo_huber_c.trim()
+        ));
+    }
+    if !config.uncond_fraction.trim().is_empty() {
+        toml.push_str(&format!(
+            "uncond_fraction = {}\n",
+            config.uncond_fraction.trim()
+        ));
+    }
 
-    toml.push_str("\neval_every_n_epochs = 1\n");
-    toml.push_str("eval_before_first_step = true\n");
-    toml.push_str("eval_micro_batch_size_per_gpu = 1\n");
-    toml.push_str("eval_gradient_accumulation_steps = 1\n\n");
+    toml.push('\n');
+    if config.eval_every_n_epochs > 0 {
+        toml.push_str(&format!(
+            "eval_every_n_epochs = {}\n",
+            config.eval_every_n_epochs
+        ));
+    }
+    if config.eval_every_n_steps > 0 {
+        toml.push_str(&format!(
+            "eval_every_n_steps = {}\n",
+            config.eval_every_n_steps
+        ));
+    }
+    if config.eval_every_n_examples > 0 {
+        toml.push_str(&format!(
+            "eval_every_n_examples = {}\n",
+            config.eval_every_n_examples
+        ));
+    }
+    toml.push_str(&format!(
+        "eval_before_first_step = {}\n",
+        config.eval_before_first_step
+    ));
+    toml.push_str(&format!(
+        "eval_micro_batch_size_per_gpu = {}\n",
+        config.eval_micro_batch_size_per_gpu.max(1)
+    ));
+    if config.image_eval_micro_batch_size_per_gpu > 0 {
+        toml.push_str(&format!(
+            "image_eval_micro_batch_size_per_gpu = {}\n",
+            config.image_eval_micro_batch_size_per_gpu
+        ));
+    }
+    toml.push_str(&format!(
+        "eval_gradient_accumulation_steps = {}\n",
+        config.eval_gradient_accumulation_steps.max(1)
+    ));
+    toml.push_str(&format!(
+        "disable_block_swap_for_eval = {}\n\n",
+        config.disable_block_swap_for_eval
+    ));
 
     if config.save_every_n_epochs > 0 {
-        toml.push_str(&format!("save_every_n_epochs = {}\n", config.save_every_n_epochs));
+        toml.push_str(&format!(
+            "save_every_n_epochs = {}\n",
+            config.save_every_n_epochs
+        ));
     }
     if config.save_every_n_steps > 0 {
-        toml.push_str(&format!("save_every_n_steps = {}\n", config.save_every_n_steps));
+        toml.push_str(&format!(
+            "save_every_n_steps = {}\n",
+            config.save_every_n_steps
+        ));
+    }
+    if config.save_every_n_examples > 0 {
+        toml.push_str(&format!(
+            "save_every_n_examples = {}\n",
+            config.save_every_n_examples
+        ));
+    }
+    if config.checkpoint_every_n_epochs > 0 {
+        toml.push_str(&format!(
+            "checkpoint_every_n_epochs = {}\n",
+            config.checkpoint_every_n_epochs
+        ));
     }
     if config.checkpoint_every_n_minutes > 0 {
-        toml.push_str(&format!("checkpoint_every_n_minutes = {}\n", config.checkpoint_every_n_minutes));
+        toml.push_str(&format!(
+            "checkpoint_every_n_minutes = {}\n",
+            config.checkpoint_every_n_minutes
+        ));
     }
 
     let ac = config.activation_checkpointing.trim();
@@ -217,15 +362,35 @@ fn write_diffusion_pipe_main_toml(
     if config.blocks_to_swap > 0 {
         toml.push_str(&format!("blocks_to_swap = {}\n", config.blocks_to_swap));
     }
+    toml.push_str(&format!(
+        "reentrant_activation_checkpointing = {}\n",
+        config.reentrant_activation_checkpointing
+    ));
+    toml.push_str(&format!("compile = {}\n", config.compile));
+    toml.push_str(&format!(
+        "video_clip_mode = {}\n",
+        toml_single_quoted(&config.video_clip_mode)
+    ));
+    toml.push_str(&format!("x_axis_examples = {}\n", config.x_axis_examples));
+    toml.push_str(&format!(
+        "logging_steps = {}\n",
+        config.logging_steps.max(1)
+    ));
 
     toml.push_str("partition_method = 'parameters'\n");
 
     let save_dtype = config.save_dtype.trim();
     if !save_dtype.is_empty() {
-        toml.push_str(&format!("save_dtype = {}\n", toml_single_quoted(save_dtype)));
+        toml.push_str(&format!(
+            "save_dtype = {}\n",
+            toml_single_quoted(save_dtype)
+        ));
     }
     toml.push_str("caching_batch_size = 1\n");
-    toml.push_str(&format!("steps_per_print = {}\n", config.steps_per_print.max(1)));
+    toml.push_str(&format!(
+        "steps_per_print = {}\n",
+        config.steps_per_print.max(1)
+    ));
 
     // [model]
     toml.push_str("\n[model]\n");
@@ -237,7 +402,7 @@ fn write_diffusion_pipe_main_toml(
     // - ckpt_path       : hunyuan-video / hunyuan_video_15 (directory with all weights)
     // - transformer_path: everything else (anima/cosmos_predict2, flux, sd3, sdxl, …)
     let uses_diffusers_path = matches!(model_type, "qwen_image" | "ernie_image" | "z_image");
-    let uses_ckpt_path      = matches!(model_type, "hunyuan-video" | "hunyuan_video_15");
+    let uses_ckpt_path = matches!(model_type, "hunyuan-video" | "hunyuan_video_15");
 
     let model_path = config.model_path.trim();
     let extra_transformer_path = config.transformer_path.trim();
@@ -284,11 +449,32 @@ fn write_diffusion_pipe_main_toml(
     }
     let transformer_dtype = config.transformer_dtype.trim();
     if !transformer_dtype.is_empty() {
-        toml.push_str(&format!("transformer_dtype = {}\n", toml_single_quoted(transformer_dtype)));
+        toml.push_str(&format!(
+            "transformer_dtype = {}\n",
+            toml_single_quoted(transformer_dtype)
+        ));
     }
     let tsm = config.timestep_sample_method.trim();
     if !tsm.is_empty() {
-        toml.push_str(&format!("timestep_sample_method = {}\n", toml_single_quoted(tsm)));
+        toml.push_str(&format!(
+            "timestep_sample_method = {}\n",
+            toml_single_quoted(tsm)
+        ));
+    }
+    if !config.diffusion_model_dtype.trim().is_empty() {
+        toml.push_str(&format!(
+            "diffusion_model_dtype = {}\n",
+            toml_single_quoted(&config.diffusion_model_dtype)
+        ));
+    }
+    if !config.model_guidance.trim().is_empty() {
+        toml.push_str(&format!("guidance = {}\n", config.model_guidance.trim()));
+    }
+    if !config.sigmoid_scale.trim().is_empty() {
+        toml.push_str(&format!(
+            "sigmoid_scale = {}\n",
+            config.sigmoid_scale.trim()
+        ));
     }
 
     // [adapter] — omit entirely for full fine-tuning
@@ -302,6 +488,18 @@ fn write_diffusion_pipe_main_toml(
             if !lora_dtype.is_empty() {
                 toml.push_str(&format!("dtype = {}\n", toml_single_quoted(lora_dtype)));
             }
+            toml.push_str(&format!("dropout = {}\n", config.adapter_dropout.trim()));
+        } else if adapter_type == "lokr" {
+            toml.push_str(&format!("rank = {}\n", config.lora_rank));
+            toml.push_str(&format!(
+                "decompose_factor = {}\nrank_dropout = {}\n",
+                config.lokr_decompose_factor,
+                config.lokr_rank_dropout.trim()
+            ));
+        }
+        if !config.adapter_init_from_existing.trim().is_empty() {
+            let path = windows_path_to_wsl(&config.adapter_init_from_existing);
+            toml.push_str(&format!("init_from_existing = {}\n", toml_string(&path)));
         }
     }
 
@@ -319,17 +517,50 @@ fn write_diffusion_pipe_main_toml(
     if !wd.is_empty() {
         toml.push_str(&format!("weight_decay = {wd}\n"));
     }
-    // Standard AdamW-like defaults
-    if matches!(opt_type, "adamw_optimi" | "AdamW8bitKahan" | "AdamW") {
-        toml.push_str("betas = [0.9, 0.99]\n");
-        toml.push_str("eps = 1e-8\n");
+    if !config.optimizer_betas.trim().is_empty() {
+        toml.push_str(&format!("betas = [{}]\n", config.optimizer_betas.trim()));
+    }
+    if !config.optimizer_eps.trim().is_empty() {
+        toml.push_str(&format!("eps = {}\n", config.optimizer_eps.trim()));
+    }
+    if config.optimizer_stabilize {
+        toml.push_str("stabilize = true\n");
+    }
+    if config.optimizer_gradient_release {
+        toml.push_str("gradient_release = true\n");
+    }
+    for pair in config
+        .optimizer_args
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if let Some((key, value)) = pair.split_once('=') {
+            toml.push_str(&format!("{} = {}\n", key.trim(), value.trim()));
+        }
     }
 
     // [monitoring]
-    toml.push_str("\n[monitoring]\nenable_wandb = false\n");
+    toml.push_str(&format!(
+        "\n[monitoring]\nenable_wandb = {}\n",
+        config.enable_wandb
+    ));
+    if config.enable_wandb {
+        toml.push_str(&format!(
+            "wandb_api_key = {}\n",
+            toml_string(&config.wandb_api_key)
+        ));
+        toml.push_str(&format!(
+            "wandb_tracker_name = {}\n",
+            toml_string(&config.wandb_tracker_name)
+        ));
+        toml.push_str(&format!(
+            "wandb_run_name = {}\n",
+            toml_string(&config.wandb_run_name)
+        ));
+    }
 
-    fs::write(destination, toml)?;
-    Ok(())
+    toml
 }
 
 fn toml_single_quoted(value: &str) -> String {
@@ -353,7 +584,8 @@ pub fn build_diffusion_pipe_command(
     let dp_wsl_path = env_settings.diffusion_pipe_wsl_path.trim();
     if dp_wsl_path.is_empty() {
         return Err(AppError::Validation(
-            "diffusion-pipe WSL path is not configured. Set it in Design → Training Env.".to_string(),
+            "diffusion-pipe WSL path is not configured. Set it in Design → Training Env."
+                .to_string(),
         ));
     }
 
@@ -416,6 +648,21 @@ pub fn build_diffusion_pipe_command(
             ));
         }
     }
+    if config.regenerate_cache {
+        ds_cmd.push_str(" --regenerate_cache");
+    }
+    if config.trust_cache {
+        ds_cmd.push_str(" --trust_cache");
+    }
+    if config.reset_dataloader {
+        ds_cmd.push_str(" --reset_dataloader");
+    }
+    if config.reset_optimizer {
+        ds_cmd.push_str(" --reset_optimizer");
+    }
+    if config.reset_optimizer_params {
+        ds_cmd.push_str(" --reset_optimizer_params");
+    }
 
     bash_parts.push(ds_cmd);
 
@@ -427,7 +674,12 @@ pub fn build_diffusion_pipe_command(
         cmd
     } else {
         let mut cmd = tokio::process::Command::new("wsl");
-        cmd.arg("-d").arg(distro).arg("--").arg("bash").arg("-c").arg(&bash_script);
+        cmd.arg("-d")
+            .arg(distro)
+            .arg("--")
+            .arg("bash")
+            .arg("-c")
+            .arg(&bash_script);
         cmd
     };
 
@@ -484,7 +736,11 @@ pub async fn start_diffusion_pipe_training(
             epoch: 1,
             epoch_total: config.epochs.max(1),
             step: 0,
-            step_total: if config.max_steps > 0 { config.max_steps } else { 0 },
+            step_total: if config.max_steps > 0 {
+                config.max_steps
+            } else {
+                0
+            },
             loss: 0.185,
             lr: config.lr.trim().parse::<f64>().unwrap_or(2e-5),
             runtime_seconds: 0,
@@ -590,7 +846,13 @@ pub async fn start_diffusion_pipe_training(
             Ok((child_pid, success)) => {
                 let status =
                     final_status_after_exit(&wait_state, &wait_job_id, &control_file, success);
-                finalize_job(&wait_state, &wait_project_id, &wait_job_id, status, child_pid)
+                finalize_job(
+                    &wait_state,
+                    &wait_project_id,
+                    &wait_job_id,
+                    status,
+                    child_pid,
+                )
             }
             Err(error) => {
                 eprintln!("trainer wait failed: {error}");
@@ -625,4 +887,3 @@ mod tests {
         );
     }
 }
-

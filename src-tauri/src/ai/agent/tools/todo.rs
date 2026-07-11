@@ -24,8 +24,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::{json, Value};
 
-use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 use crate::agent_error::{AppError, AppResult};
+use crate::ai::agent::tools::{Tool, ToolFuture, ToolInvocation, ToolResult, ToolSpec};
 
 const TOOL_NAME: &str = "TodoList";
 
@@ -246,7 +246,11 @@ impl Tool for TodoListTool {
 
             match action.as_str() {
                 "add" => {
-                    let content_val = invocation.input.get("content").cloned().unwrap_or(Value::Null);
+                    let content_val = invocation
+                        .input
+                        .get("content")
+                        .cloned()
+                        .unwrap_or(Value::Null);
                     let texts: Vec<String> = match content_val {
                         Value::String(s) => vec![s],
                         Value::Array(arr) => arr

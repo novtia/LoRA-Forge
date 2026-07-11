@@ -3,7 +3,6 @@
  * @description Mock 训练器：`run_mock_trainer_from_env()` 检测 CLI 参数，若命中则运行仿真训练进程并退出。
  *   用于 Tauri 自身进程以 `__mock_trainer` 子命令重新启动时充当轻量 Python stub。
  */
-
 use std::{
     fs,
     io::Write,
@@ -40,7 +39,9 @@ fn run_mock_trainer(args: &[String]) -> AppResult<()> {
     let save_every = required_arg(args, "--save-every")?
         .parse::<u32>()
         .map_err(|_| AppError::Process("Invalid save-every value".to_string()))?;
-    let learning_rate = required_arg(args, "--lr")?.parse::<f64>().unwrap_or(0.00015);
+    let learning_rate = required_arg(args, "--lr")?
+        .parse::<f64>()
+        .unwrap_or(0.00015);
 
     fs::create_dir_all(&output_dir)?;
     println!("INFO project={} trainer=boot", project_name);
@@ -52,8 +53,16 @@ fn run_mock_trainer(args: &[String]) -> AppResult<()> {
     let write_checkpoint = |completed_epoch: u32| -> AppResult<()> {
         let checkpoint_path = output_dir.join(format!("epoch_{completed_epoch:02}.safetensors"));
         let mut checkpoint = fs::File::create(&checkpoint_path)?;
-        writeln!(checkpoint, "mock checkpoint for {} at epoch {}", project_name, completed_epoch)?;
-        println!("CHECKPOINT epoch={} file={}", completed_epoch, checkpoint_path.display());
+        writeln!(
+            checkpoint,
+            "mock checkpoint for {} at epoch {}",
+            project_name, completed_epoch
+        )?;
+        println!(
+            "CHECKPOINT epoch={} file={}",
+            completed_epoch,
+            checkpoint_path.display()
+        );
         Ok(())
     };
 
@@ -62,10 +71,14 @@ fn run_mock_trainer(args: &[String]) -> AppResult<()> {
             (((step.saturating_sub(1)) as u64 * epochs as u64) / total_steps as u64) as u32,
         );
         loop {
-            let control = read_control_state(&control_file).unwrap_or_else(|_| "running".to_string());
+            let control =
+                read_control_state(&control_file).unwrap_or_else(|_| "running".to_string());
             match control.as_str() {
                 "paused" => {
-                    println!("INFO project={} status=paused epoch={}/{} step={}/{}", project_name, epoch, epochs, step, total_steps);
+                    println!(
+                        "INFO project={} status=paused epoch={}/{} step={}/{}",
+                        project_name, epoch, epochs, step, total_steps
+                    );
                     std::thread::sleep(Duration::from_millis(400));
                     runtime_seconds = runtime_seconds.saturating_add(1);
                     continue;
@@ -89,10 +102,16 @@ fn run_mock_trainer(args: &[String]) -> AppResult<()> {
         runtime_seconds = runtime_seconds.saturating_add(1);
         let progress = step as f64 / total_steps as f64;
         let loss = (0.19 - progress * 0.13).max(0.028);
-        println!("TRAIN epoch={}/{} step={}/{} loss={:.4} lr={} runtime={}", epoch, epochs, step, total_steps, loss, learning_rate, runtime_seconds);
+        println!(
+            "TRAIN epoch={}/{} step={}/{} loss={:.4} lr={} runtime={}",
+            epoch, epochs, step, total_steps, loss, learning_rate, runtime_seconds
+        );
 
         if step % 30 == 0 {
-            eprintln!("WARN project={} note=Disk cache warming step={}", project_name, step);
+            eprintln!(
+                "WARN project={} note=Disk cache warming step={}",
+                project_name, step
+            );
         }
         std::thread::sleep(Duration::from_millis(150));
     }

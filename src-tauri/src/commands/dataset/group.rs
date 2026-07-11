@@ -1,8 +1,7 @@
-﻿/**
+/**
  * @file commands/dataset/group.rs
  * @description 分组命令：创建组/移动图片/重命名组/删除组/设置组类型。
  */
-
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -20,12 +19,12 @@ use crate::{
     utils::normalize_relative_path,
 };
 
-use super::{
-    GroupDatasetImagesInput, MoveDatasetImagesInput, RemoveDatasetGroupInput,
-    RenameDatasetGroupInput, SetDatasetGroupTypeInput, caption_path_for_image,
-    is_image_file, resolve_dataset_path,
-};
 use super::browse::list_dataset_entries_inner;
+use super::{
+    caption_path_for_image, is_image_file, resolve_dataset_path, GroupDatasetImagesInput,
+    MoveDatasetImagesInput, RemoveDatasetGroupInput, RenameDatasetGroupInput,
+    SetDatasetGroupTypeInput,
+};
 
 #[tauri::command]
 pub fn group_dataset_images(
@@ -68,7 +67,9 @@ pub fn set_dataset_group_type(
 }
 
 pub(super) fn sanitize_group_segment(name: &str) -> AppResult<String> {
-    let trimmed = name.trim().trim_matches(|c: char| c == '.' || c.is_whitespace());
+    let trimmed = name
+        .trim()
+        .trim_matches(|c: char| c == '.' || c.is_whitespace());
     if trimmed.is_empty() {
         return Err(AppError::Validation(
             "Group name must not be empty.".to_string(),
@@ -97,8 +98,8 @@ pub(super) fn sanitize_group_segment(name: &str) -> AppResult<String> {
     // Reject reserved Windows device names (case-insensitive).
     let upper = cleaned.to_ascii_uppercase();
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     let bare = upper.split('.').next().unwrap_or("");
     if RESERVED.contains(&bare) {
@@ -114,7 +115,10 @@ pub(super) fn sanitize_group_segment(name: &str) -> AppResult<String> {
 
 /// Resolves a dataset-root-relative parent directory; an empty/`"."`/`"/"` input maps to
 /// the dataset root itself.
-pub(super) fn resolve_dataset_parent_dir(dataset_root: &Path, parent_relative: &str) -> AppResult<PathBuf> {
+pub(super) fn resolve_dataset_parent_dir(
+    dataset_root: &Path,
+    parent_relative: &str,
+) -> AppResult<PathBuf> {
     let trimmed = parent_relative.trim().trim_matches('/');
     if trimmed.is_empty() || trimmed == "." {
         return Ok(dataset_root.to_path_buf());
@@ -253,8 +257,10 @@ fn group_dataset_images_inner(
     }
     let canonical_dataset_root = fs::canonicalize(&dataset_root)?;
 
-    let parent_dir =
-        resolve_dataset_parent_dir(&dataset_root, input.parent_relative_path.as_deref().unwrap_or(""))?;
+    let parent_dir = resolve_dataset_parent_dir(
+        &dataset_root,
+        input.parent_relative_path.as_deref().unwrap_or(""),
+    )?;
     let sanitized = sanitize_group_segment(&input.group_name)?;
     let group_dir = unique_group_folder(&parent_dir, &sanitized);
     fs::create_dir_all(&group_dir)?;
@@ -263,7 +269,12 @@ fn group_dataset_images_inner(
         if relative_path.trim().is_empty() {
             continue;
         }
-        move_image_into_dir(&dataset_root, &canonical_dataset_root, relative_path, &group_dir)?;
+        move_image_into_dir(
+            &dataset_root,
+            &canonical_dataset_root,
+            relative_path,
+            &group_dir,
+        )?;
     }
 
     list_dataset_entries_inner(state, &input.project_id)
@@ -288,7 +299,12 @@ fn move_dataset_images_inner(
         if relative_path.trim().is_empty() {
             continue;
         }
-        move_image_into_dir(&dataset_root, &canonical_dataset_root, relative_path, &target_dir)?;
+        move_image_into_dir(
+            &dataset_root,
+            &canonical_dataset_root,
+            relative_path,
+            &target_dir,
+        )?;
     }
 
     list_dataset_entries_inner(state, &input.project_id)
@@ -403,7 +419,8 @@ fn remove_dataset_group_inner(
     let result = match fs::remove_dir(&group_path) {
         Ok(()) => Ok(()),
         Err(_) if has_other => Err(AppError::Validation(
-            "Group still contains non-image content. Re-run with deleteContents=true to remove it.".to_string(),
+            "Group still contains non-image content. Re-run with deleteContents=true to remove it."
+                .to_string(),
         )),
         Err(err) => Err(err.into()),
     };
@@ -451,5 +468,3 @@ pub(super) fn parent_relative_path(relative_path: &str) -> String {
         .map(|(parent, _)| parent.to_string())
         .unwrap_or_default()
 }
-
-

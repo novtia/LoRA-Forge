@@ -1,8 +1,7 @@
-﻿/**
+/**
  * @file commands/dataset/browse.rs
  * @description 数据集浏览命令：列目录、获取资产、预览图生成、样图列表。
  */
-
 use std::{
     collections::hash_map::DefaultHasher,
     fs,
@@ -20,14 +19,11 @@ use crate::{
     error::{AppError, AppResult},
     models::{DatasetAsset, DatasetEntry, DatasetPreviewAsset, SampleImageEntry},
     state::AppState,
-    utils::{
-        cmp_str_natural, hidden_std_command, normalize_display_path, normalize_relative_path,
-    },
+    utils::{cmp_str_natural, hidden_std_command, normalize_display_path, normalize_relative_path},
 };
 
 use super::{
-    collect_images, is_image_file, read_caption_file,
-    resolve_dataset_path, visit_dataset,
+    collect_images, is_image_file, read_caption_file, resolve_dataset_path, visit_dataset,
 };
 use crate::utils::ensure_within;
 
@@ -73,13 +69,13 @@ pub fn list_sample_images(
     project_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<SampleImageEntry>, String> {
-    respond(list_sample_images_inner(
-        state.inner().clone(),
-        &project_id,
-    ))
+    respond(list_sample_images_inner(state.inner().clone(), &project_id))
 }
 
-pub(super) fn list_dataset_entries_inner(state: AppState, project_id: &str) -> AppResult<Vec<DatasetEntry>> {
+pub(super) fn list_dataset_entries_inner(
+    state: AppState,
+    project_id: &str,
+) -> AppResult<Vec<DatasetEntry>> {
     let project = state.with_db(|connection| db::get_project(connection, project_id))?;
     let dataset_root = PathBuf::from(project.dataset_path);
     if !dataset_root.exists() {
@@ -91,9 +87,7 @@ pub(super) fn list_dataset_entries_inner(state: AppState, project_id: &str) -> A
 
     let mut entries = Vec::new();
     visit_dataset(&dataset_root, &dataset_root, 0, &mut entries, &group_types)?;
-    entries.sort_by(|left, right| {
-        cmp_str_natural(&left.relative_path, &right.relative_path)
-    });
+    entries.sort_by(|left, right| cmp_str_natural(&left.relative_path, &right.relative_path));
     Ok(entries)
 }
 

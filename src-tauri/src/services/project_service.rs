@@ -2,7 +2,6 @@
  * @file services/project_service.rs
  * @description 项目 CRUD 编排：列出/查询/创建项目，计算磁盘占用，初始化目录与默认训练配置。
  */
-
 use std::{fs, path::Path};
 
 use crate::{

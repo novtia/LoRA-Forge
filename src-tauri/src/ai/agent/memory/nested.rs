@@ -59,7 +59,9 @@ pub fn collect_nested_memory(
         if !mf.conditional {
             continue;
         }
-        let Some(globs) = &mf.path_globs else { continue };
+        let Some(globs) = &mf.path_globs else {
+            continue;
+        };
         if globs.is_empty() {
             continue;
         }

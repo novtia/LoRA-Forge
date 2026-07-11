@@ -1164,7 +1164,7 @@ export default function ProjectDetailPage() {
       ) : null}
 
       {view === "config" ? (
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div className="config-workspace-scroll">
           {/* Training mode tab bar */}
           <div
             style={{

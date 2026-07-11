@@ -100,8 +100,8 @@ mod re_exports {
     };
     pub use super::core::context::{ToolUseContext, ToolUseContextBuilder};
     pub use super::core::permission::{
-        AllowAllResolver, BASH_WRITE_PREFIXES, PermissionDecision, PermissionMode,
-        PermissionResolver, PlanModeResolver, WRITE_TOOLS,
+        AllowAllResolver, PermissionDecision, PermissionMode, PermissionResolver, PlanModeResolver,
+        BASH_WRITE_PREFIXES, WRITE_TOOLS,
     };
     pub use super::core::task::{Task, TaskId, TaskKind, TaskState, TaskStore};
     // config
@@ -111,16 +111,16 @@ mod re_exports {
     // memory
     pub use super::memory::nested::{collect_nested_memory, glob_match};
     pub use super::memory::session::{
-        DEFAULT_TEMPLATE as SESSION_MEMORY_TEMPLATE, FsSessionMemoryExtractor, SessionMemoryConfig,
+        FsSessionMemoryExtractor, SessionMemoryConfig, DEFAULT_TEMPLATE as SESSION_MEMORY_TEMPLATE,
     };
     pub use super::memory::user_context::{FsUserContextLoader, UserContextConfig};
     // exec
     pub use super::exec::engine::{
-        AgentChatOutcome, EngineTurn, ProviderEngine, ProviderQueryEngine, ToolUseRequest,
-        inject_attachments_into_history, run_chat_request,
+        inject_attachments_into_history, run_chat_request, AgentChatOutcome, EngineTurn,
+        ProviderEngine, ProviderQueryEngine, ToolUseRequest,
     };
     pub use super::exec::query::{QueryEngine, QueryRequest, QueryResult};
-    pub use super::exec::runner::{RunAgentParams, RunAgentResult, run_agent};
+    pub use super::exec::runner::{run_agent, RunAgentParams, RunAgentResult};
     // shared
     pub use super::types::{
         AgentId, AgentRunMode, MessageEvent, MessageId, MessageRole, QuerySource,

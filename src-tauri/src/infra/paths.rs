@@ -2,7 +2,6 @@
  * @file infra/paths.rs
  * @description 应用磁盘路径布局（app_dir/db/jobs/hardware_cache），由 AppState 在启动时填充。
  */
-
 use std::path::PathBuf;
 
 #[allow(dead_code)]

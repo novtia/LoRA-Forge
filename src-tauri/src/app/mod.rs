@@ -3,7 +3,6 @@
  * @description Tauri 入口装配：构建 Builder、注册 AppState、挂载 plugin、生成 invoke_handler。
  *   lib.rs 只调 `app::run()`，所有装配细节都在这里。
  */
-
 use tauri::Manager;
 
 use crate::{agent_app, infra::state::AppState, trainer};
@@ -81,6 +80,8 @@ pub fn run() {
             crate::commands::training::export_checkpoint,
             crate::commands::training::load_diffusion_pipe_config,
             crate::commands::training::save_diffusion_pipe_config,
+            crate::commands::training::preview_sd_scripts_config,
+            crate::commands::training::preview_diffusion_pipe_config,
             crate::commands::training::start_diffusion_pipe_training,
             crate::commands::system::get_system_stats,
             crate::commands::system::get_active_job,

@@ -1,9 +1,11 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
-use crate::data::db::{now_ms, DbConn};
-use crate::data::settings::{validate_model_param_settings, ModelParamSettings, DEFAULT_HISTORY_TURNS};
 use crate::agent_error::{AppError, AppResult};
+use crate::data::db::{now_ms, DbConn};
+use crate::data::settings::{
+    validate_model_param_settings, ModelParamSettings, DEFAULT_HISTORY_TURNS,
+};
 
 fn decode_llm_params(raw: Option<String>) -> ModelParamSettings {
     raw.and_then(|s| serde_json::from_str(&s).ok())
@@ -56,7 +58,9 @@ pub fn upsert_from_lora(
     updated_at: i64,
 ) -> AppResult<Project> {
     if id.trim().is_empty() {
-        return Err(AppError::Invalid("lora project id must be non-empty".into()));
+        return Err(AppError::Invalid(
+            "lora project id must be non-empty".into(),
+        ));
     }
     let now = now_ms();
     conn.execute(
@@ -81,9 +85,7 @@ pub fn upsert_from_lora(
 }
 
 pub fn list(conn: &DbConn) -> AppResult<Vec<Project>> {
-    let sql = format!(
-        "SELECT {SELECT_COLS} FROM projects ORDER BY sort_order ASC, created_at ASC"
-    );
+    let sql = format!("SELECT {SELECT_COLS} FROM projects ORDER BY sort_order ASC, created_at ASC");
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(params![], map_project)?;
     let mut out = Vec::new();

@@ -2,7 +2,6 @@
  * @file domain/llm.rs
  * @description LLM 领域类型：供应商档案、全局行为设置、生效请求设置，以及 endpoint kind/推理强度/上一图注入策略等枚举。
  */
-
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

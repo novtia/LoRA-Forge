@@ -10,10 +10,10 @@
 //! but with `tools = []` and a dedicated system prompt — we don't want
 //! the summariser deciding to call tools.
 
+use crate::agent_error::AppResult;
 use crate::ai::agent::exec::engine::ProviderEngine;
 use crate::ai::chat::{ChatRequest, HistoryTurn};
 use crate::ai::tokens::TokenUsage;
-use crate::agent_error::AppResult;
 
 /// Tuning parameters for compaction. Defaults aim at a 128k-context
 /// model with comfortable headroom for the final answer.
@@ -40,11 +40,7 @@ impl Default for CompactionPolicy {
 
 /// Decision-only check. Returns `true` iff `chat.history` has enough
 /// material to compact *and* token usage crossed the threshold.
-pub fn should_compact(
-    history_len: usize,
-    usage: &TokenUsage,
-    policy: &CompactionPolicy,
-) -> bool {
+pub fn should_compact(history_len: usize, usage: &TokenUsage, policy: &CompactionPolicy) -> bool {
     let total = usage.total_tokens.unwrap_or(0);
     total >= policy.threshold_tokens && history_len > policy.keep_recent + 1
 }
@@ -93,7 +89,9 @@ pub async fn compact(
 
     let meta = HistoryTurn {
         role: "user".to_string(),
-        text: Some(format!("<compacted_summary>\n{summary}\n</compacted_summary>")),
+        text: Some(format!(
+            "<compacted_summary>\n{summary}\n</compacted_summary>"
+        )),
         images: Vec::new(),
         thinking_content: None,
     };

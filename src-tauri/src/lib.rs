@@ -3,7 +3,6 @@
  * @description 入口层：mod 声明 + pub fn run()（委托给 app::run()）+ mock trainer 入口。
  *   所有 Tauri Builder 装配都在 app/mod.rs。
  */
-
 mod agent_app;
 mod agent_error;
 mod ai;

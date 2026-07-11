@@ -2,7 +2,6 @@
  * @file llm/http.rs
  * @description 全局共享 HTTP 客户端（reqwest）、响应体调试打印、错误提取、caption 清洗、MIME 类型等 HTTP 层工具。
  */
-
 use std::{path::Path, sync::OnceLock, time::Duration};
 
 use reqwest::Client;
@@ -67,7 +66,9 @@ pub(crate) fn print_llm_network_error_to_stderr(phase: &str, detail: &str) {
     eprintln!("[llm] network error during {phase}: {detail}");
 }
 
-pub(crate) fn openrouter_extra_headers(kind: EndpointKind) -> &'static [(&'static str, &'static str)] {
+pub(crate) fn openrouter_extra_headers(
+    kind: EndpointKind,
+) -> &'static [(&'static str, &'static str)] {
     match kind {
         EndpointKind::OpenRouter => &[
             ("HTTP-Referer", "https://lora-forge.local"),
@@ -126,7 +127,10 @@ pub(crate) fn print_llm_http_response_body_to_stderr(http_status: u16, body: &st
             let head: String = body.chars().take(LOG_FIELD_TRUNCATE_CHARS).collect();
             eprintln!("{head}");
             if body.chars().count() > LOG_FIELD_TRUNCATE_CHARS {
-                eprintln!("…(truncated {} chars)", body.chars().count() - LOG_FIELD_TRUNCATE_CHARS);
+                eprintln!(
+                    "…(truncated {} chars)",
+                    body.chars().count() - LOG_FIELD_TRUNCATE_CHARS
+                );
             }
         }
     }
@@ -270,12 +274,18 @@ pub(crate) fn blocking_finish_reason(payload: &Value) -> Option<String> {
     if let Some(s) = payload.pointer("/choices/0/finish_reason").and_then(pick) {
         return Some(s);
     }
-    payload.pointer("/choices/0/native_finish_reason").and_then(pick)
+    payload
+        .pointer("/choices/0/native_finish_reason")
+        .and_then(pick)
 }
 
 pub(crate) fn non_empty_text(value: &str) -> Option<String> {
     let trimmed = value.trim();
-    if trimmed.is_empty() { None } else { Some(trimmed.to_string()) }
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 pub(crate) fn response_excerpt(body: &str) -> String {
@@ -362,7 +372,10 @@ mod tests {
     #[test]
     fn extract_string_content() {
         let v = json!({"choices": [{"message": {"content": "  pretty image  "}}]});
-        assert_eq!(extract_user_visible_caption(&v), Some("pretty image".to_string()));
+        assert_eq!(
+            extract_user_visible_caption(&v),
+            Some("pretty image".to_string())
+        );
     }
 
     #[test]
@@ -379,12 +392,16 @@ mod tests {
         let v = json!({
             "choices": [{"message": {"content": [{"type": "reasoning", "text": "ignored"},{"type": "text", "text": "good caption"}]}}]
         });
-        assert_eq!(extract_user_visible_caption(&v), Some("good caption".to_string()));
+        assert_eq!(
+            extract_user_visible_caption(&v),
+            Some("good caption".to_string())
+        );
     }
 
     #[test]
     fn finish_reason_blocked() {
-        let v = json!({"choices": [{"finish_reason": "content_filter", "message": {"content": "x"}}]});
+        let v =
+            json!({"choices": [{"finish_reason": "content_filter", "message": {"content": "x"}}]});
         assert!(blocking_finish_reason(&v).is_some());
         let v2 = json!({"choices": [{"finish_reason": "stop", "native_finish_reason": "PROHIBITED_CONTENT"}]});
         assert!(blocking_finish_reason(&v2).is_some());
@@ -400,7 +417,10 @@ mod tests {
 
     #[test]
     fn sanitize_strips_fenced_code() {
-        assert_eq!(sanitize_caption("```\ngirl, smiling, outdoor\n```"), "girl, smiling, outdoor");
+        assert_eq!(
+            sanitize_caption("```\ngirl, smiling, outdoor\n```"),
+            "girl, smiling, outdoor"
+        );
     }
 
     #[test]

@@ -47,7 +47,9 @@ pub fn is_thinking_model(model_id: &str) -> bool {
     }
 
     // Gemini thinking 系列
-    if id.contains("gemini") && (id.contains("thinking") || id.contains("-pro") || id.contains("2.5")) {
+    if id.contains("gemini")
+        && (id.contains("thinking") || id.contains("-pro") || id.contains("2.5"))
+    {
         return true;
     }
 
@@ -122,10 +124,7 @@ fn build_openrouter_reasoning(
         ));
     }
 
-    let effort = settings
-        .reasoning_effort
-        .as_effort_str()
-        .unwrap_or("high");
+    let effort = settings.reasoning_effort.as_effort_str().unwrap_or("high");
     Some(("reasoning", json!({ "effort": effort })))
 }
 
@@ -159,10 +158,7 @@ fn build_openai_reasoning(
         return None;
     }
     // 用户显式 None 也照发；非 thinking 模型上面已经返回
-    let effort = settings
-        .reasoning_effort
-        .as_effort_str()
-        .unwrap_or("high");
+    let effort = settings.reasoning_effort.as_effort_str().unwrap_or("high");
     Some(("reasoning_effort", Value::String(effort.to_string())))
 }
 
@@ -216,10 +212,7 @@ mod tests {
 
     #[test]
     fn openrouter_thinking_default_high() {
-        let s = mk(
-            "https://openrouter.ai/api/v1",
-            "google/gemini-2.5-pro",
-        );
+        let s = mk("https://openrouter.ai/api/v1", "google/gemini-2.5-pro");
         let payload = build_reasoning_payload(EndpointKind::OpenRouter, &s, true).unwrap();
         assert_eq!(payload.0, "reasoning");
         assert_eq!(payload.1, json!({ "effort": "high" }));
@@ -227,10 +220,7 @@ mod tests {
 
     #[test]
     fn openrouter_thinking_budget_overrides_effort() {
-        let mut s = mk(
-            "https://openrouter.ai/api/v1",
-            "google/gemini-2.5-pro",
-        );
+        let mut s = mk("https://openrouter.ai/api/v1", "google/gemini-2.5-pro");
         s.reasoning_budget = 2048;
         let payload = build_reasoning_payload(EndpointKind::OpenRouter, &s, true).unwrap();
         assert_eq!(payload.1, json!({ "max_tokens": 2048 }));
@@ -238,10 +228,7 @@ mod tests {
 
     #[test]
     fn openrouter_explicit_none() {
-        let mut s = mk(
-            "https://openrouter.ai/api/v1",
-            "google/gemini-2.5-pro",
-        );
+        let mut s = mk("https://openrouter.ai/api/v1", "google/gemini-2.5-pro");
         s.reasoning_effort = ReasoningEffort::None;
         let payload = build_reasoning_payload(EndpointKind::OpenRouter, &s, true).unwrap();
         assert_eq!(payload.1, json!({ "effort": "none" }));
@@ -267,9 +254,6 @@ mod tests {
         let payload = build_reasoning_payload(EndpointKind::AnthropicCompat, &s, true).unwrap();
         assert_eq!(payload.0, "thinking");
         // max_tokens=4096 → budget = max(1024, 2048) = 2048
-        assert_eq!(
-            payload.1,
-            json!({"type":"enabled","budget_tokens":2048})
-        );
+        assert_eq!(payload.1, json!({"type":"enabled","budget_tokens":2048}));
     }
 }

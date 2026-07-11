@@ -1,4 +1,4 @@
-﻿pub mod diffusion_pipe;
+pub mod diffusion_pipe;
 pub mod events;
 pub mod log_parser;
 pub mod mock;
@@ -37,7 +37,7 @@ pub use stats::{collect_system_stats, start_system_stats_publisher};
 
 use log_parser::{
     infer_log_level, normalize_log_level, parse_deepspeed_progress_line, parse_progress_line,
-    progress_from_structured_log, parse_structured_log_line, serialize_metrics, ParsedProgress,
+    parse_structured_log_line, progress_from_structured_log, serialize_metrics, ParsedProgress,
 };
 
 pub(super) const ABORT_GRACE_PERIOD: Duration = Duration::from_secs(3);
@@ -71,7 +71,16 @@ fn utc_now_str() -> String {
     let month_lens: [u8; 12] = [
         31,
         if is_leap_year(year) { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
     ];
     let mut month = 1u8;
     for &len in &month_lens {
@@ -96,11 +105,15 @@ fn open_project_log_file(root_path: &str, job_id: &str) -> SharedLogFile {
             .create(true)
             .append(true)
             .open(&log_path)?;
-        Ok(Arc::new(Mutex::new(Box::new(file) as Box<dyn std::io::Write + Send>)))
+        Ok(Arc::new(Mutex::new(
+            Box::new(file) as Box<dyn std::io::Write + Send>
+        )))
     };
     try_open().unwrap_or_else(|e| {
         eprintln!("Failed to open project log file: {e}");
-        Arc::new(Mutex::new(Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>))
+        Arc::new(Mutex::new(
+            Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
+        ))
     })
 }
 
@@ -148,7 +161,6 @@ fn training_subprocess_command(program: impl AsRef<std::ffi::OsStr>) -> tokio::p
     cmd
 }
 
-
 /// Reads stdout/stderr from the trainer and dispatches each logical "line".
 ///
 /// We can't use `read_until(b'\n', …)` here because tqdm (used by sd-scripts) emits
@@ -185,14 +197,32 @@ where
         }
         for &byte in &chunk[..n] {
             if byte == b'\n' || byte == b'\r' {
-                flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending, &log_file).await?;
+                flush_pending(
+                    &app,
+                    &state,
+                    &project_id,
+                    &job_id,
+                    stream,
+                    &mut pending,
+                    &log_file,
+                )
+                .await?;
             } else {
                 pending.push(byte);
             }
         }
     }
 
-    flush_pending(&app, &state, &project_id, &job_id, stream, &mut pending, &log_file).await?;
+    flush_pending(
+        &app,
+        &state,
+        &project_id,
+        &job_id,
+        stream,
+        &mut pending,
+        &log_file,
+    )
+    .await?;
 
     Ok(())
 }
@@ -348,11 +378,7 @@ async fn force_kill_process(pid: Option<u32>) -> AppResult<()> {
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut command = hidden_command("taskkill");
-        command
-            .arg("/PID")
-            .arg(pid.to_string())
-            .arg("/T")
-            .arg("/F");
+        command.arg("/PID").arg(pid.to_string()).arg("/T").arg("/F");
         command
     };
 
@@ -508,9 +534,7 @@ fn build_snapshot_from_progress(
             .or_else(|| current_job.as_ref().map(|job| job.lr))
             .unwrap_or(0.0),
         runtime_seconds,
-        pid: state
-            .runtime_job(project_id)?
-            .and_then(|job| job.pid),
+        pid: state.runtime_job(project_id)?.and_then(|job| job.pid),
         status: current_status(state, job_id)?,
     })
 }
